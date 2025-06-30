@@ -1,4 +1,4 @@
-#include "ExampleDialect.h"
+#include "LetAlgDialect.h"
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -9,43 +9,43 @@
 #include "llvm/ADT/TypeSwitch.h"
 
 using namespace mlir;
-using namespace mlir::example;
+using namespace mlir::letalg;
 
 //===----------------------------------------------------------------------===//
-// Example dialect.
+// LetAlg dialect.
 //===----------------------------------------------------------------------===//
 
 // Include the auto-generated definitions.
-#include "ExampleDialectDialect.cpp.inc"
+#include "LetAlgDialectDialect.cpp.inc"
 
-void ExampleDialect::initialize() {
+void LetAlgDialect::initialize() {
   addOperations<
 #define GET_OP_LIST
-#include "ExampleDialectOps.cpp.inc"
+#include "LetAlgDialectOps.cpp.inc"
   >();
 }
 
-void ExampleDialect::registerOps() {
+void LetAlgDialect::registerOps() {
   addOperations<
 #define GET_OP_LIST
-#include "ExampleDialectOps.cpp.inc"
+#include "LetAlgDialectOps.cpp.inc"
   >();
 }
 
-Type ExampleDialect::parseType(DialectAsmParser &parser) const {
+Type LetAlgDialect::parseType(DialectAsmParser &parser) const {
     return {};
 }
 
-void ExampleDialect::printType(Type type, DialectAsmPrinter &printer) const {
+void LetAlgDialect::printType(Type type, DialectAsmPrinter &printer) const {
 }
 
 //===----------------------------------------------------------------------===//
-// Example Operations
+// LetAlg Operations
 //===----------------------------------------------------------------------===//
 
 // Include the auto-generated operation definitions.
 #define GET_OP_CLASSES
-#include "ExampleDialectOps.cpp.inc"
+#include "LetAlgDialectOps.cpp.inc"
 
 //===----------------------------------------------------------------------===//
 // ConstantOp

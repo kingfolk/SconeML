@@ -1,4 +1,7 @@
-#include "ExampleDialect.h"
+#include <memory>
+#include "LetAlgDialect.h"
+#include "Parser.h"
+#include "AstToLetAlg.h"
 
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -24,6 +27,13 @@
 using namespace mlir;
 
 int main(int argc, char **argv) {
+  // std::string input = "let f x = let f1 y = y + 1 in f1 (x * 2)";
+  // std::string input = "let x = 1 in let y = 2 in x + y";
+  // std::string input = "let x = 1 in x + let y = 2 in y + 10";
+  std::string input = "let f x = x + 10 in f 2";
+  auto expr = cakeml::parse(input);
+
+  
   // Register any command line options.
   registerAsmPrinterCLOptions();
   registerMLIRContextCLOptions();
@@ -34,8 +44,8 @@ int main(int argc, char **argv) {
 
   MLIRContext context;
   
-  // Load dialects including our example dialect
-  context.getOrLoadDialect<example::ExampleDialect>();
+  // Load dialects including our letalg dialect
+  context.getOrLoadDialect<letalg::LetAlgDialect>();
   context.getOrLoadDialect<func::FuncDialect>();
   context.getOrLoadDialect<arith::ArithDialect>();
 
@@ -46,26 +56,20 @@ int main(int argc, char **argv) {
   auto module = builder.create<ModuleOp>(loc);
   builder.setInsertionPointToStart(module.getBody());
 
-  // Create a function that uses our example operations
+  // Create a function that uses our letalg operations
   auto funcType = builder.getFunctionType({}, {});
   auto function = builder.create<func::FuncOp>(loc, "test_function", funcType);
   
   auto &entryBlock = *function.addEntryBlock();
   builder.setInsertionPointToStart(&entryBlock);
 
-  // Create some operations from our dialect
-  auto constantOp = builder.create<example::ConstantOp>(loc, 42.0);
-  auto constantOp2 = builder.create<example::ConstantOp>(loc, 24.0);
-  
-  auto addOp = builder.create<example::AddOp>(loc, 
-                                              builder.getF64Type(),
-                                              constantOp.getResult(), 
-                                              constantOp2.getResult());
-  
-  builder.create<example::PrintOp>(loc, addOp.getResult());
-  
-  // Add return
-  builder.create<func::ReturnOp>(loc);
+  auto last = cakeml::translate(builder, expr.get());
+  builder.create<mlir::letalg::YieldOp>(loc, last.getType(), last);
+
+  // Print the generated MLIR
+  llvm::outs() << "Generated MLIR:\n";
+  module.print(llvm::outs());
+  llvm::outs() << "\n";
 
   // Verify the module
   if (failed(verify(module))) {
@@ -73,41 +77,17 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  // Print the generated MLIR
-  llvm::outs() << "Generated MLIR:\n";
-  module.print(llvm::outs());
-  llvm::outs() << "\n";
-
-  // Example MLIR code string for parsing
-  const char *exampleMLIR = R"mlir(
-    module {
-      func.func @example() {
-        %0 = example.constant 5.5 : f64
-        %1 = example.constant 2.5 : f64
-        %2 = example.add %0, %1 : f64
-        example.print %2 : f64
-        return
-      }
-    }
-  )mlir";
-
-  // Parse the example MLIR
-  auto parseModule = parseSourceString<ModuleOp>(exampleMLIR, &context);
-  if (!parseModule) {
-    llvm::errs() << "Failed to parse example MLIR\n";
-    return 1;
-  }
-
-  // Verify the parsed module
-  if (failed(verify(*parseModule))) {
-    llvm::errs() << "Parsed module verification failed\n";
-    return 1;
-  }
-
-  llvm::outs() << "\nParsed MLIR:\n";
-  parseModule->print(llvm::outs());
-  llvm::outs() << "\n";
-
-  llvm::outs() << "Example dialect operations executed successfully!\n";
   return 0;
 }
+
+
+// consider
+// let create_multiplier_adder factor offset =
+//   let inner_function_x x =
+//     let innermost_function_y y =
+//       (x * factor) + (y + offset)
+//     in
+//     innermost_function_y
+//   in
+//   inner_function_x
+// ;;
