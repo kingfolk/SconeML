@@ -11,6 +11,49 @@
 using namespace mlir;
 using namespace mlir::letalg;
 
+// BORROW FROM lingodb. Not original
+ParseResult parseCustRegion(OpAsmParser& parser, Region& result) {
+   OpAsmParser::Argument predArgument;
+   SmallVector<OpAsmParser::Argument, 4> regionArgs;
+   SmallVector<Type, 4> argTypes;
+   if (parser.parseLParen()) {
+      return failure();
+   }
+   while (true) {
+      Type predArgType;
+      if (!parser.parseOptionalRParen()) {
+         break;
+      }
+      if (parser.parseArgument(predArgument) || parser.parseColonType(predArgType)) {
+         return failure();
+      }
+      predArgument.type = predArgType;
+      regionArgs.push_back(predArgument);
+      if (!parser.parseOptionalComma()) { continue; }
+      if (parser.parseRParen()) { return failure(); }
+      break;
+   }
+
+   if (parser.parseRegion(result, regionArgs)) return failure();
+   return success();
+}
+
+// BORROW FROM lingodb. Not original
+void printCustRegion(OpAsmPrinter& p, Operation* op, Region& r) {
+   p << "(";
+   bool first = true;
+   for (auto arg : r.front().getArguments()) {
+      if (first) {
+         first = false;
+      } else {
+         p << ",";
+      }
+      p << arg << ": " << arg.getType();
+   }
+   p << ")";
+   p.printRegion(r, false, true);
+}
+
 //===----------------------------------------------------------------------===//
 // LetAlg dialect.
 //===----------------------------------------------------------------------===//

@@ -5,11 +5,10 @@
 #include "LetAlgDialect.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 
 #include <string>
 #include <vector>
-
-using llvm::cast;
 
 namespace cakeml {
 struct LetContext {
@@ -92,7 +91,9 @@ mlir::Value translateLambda(mlir::OpBuilder& builder, LambdaExprNode* lambda) {
   builder.setInsertionPointToStart(scopeBlock);
   auto v = translateExpr(builder, lambda->getBody(), ctx);
   builder.create<mlir::letalg::YieldOp>(loc, v.getType(), v);
-  lambdaOp.getResult().setType(v.getType());
+  lambdaOp.getResult().setType(
+    mlir::FunctionType::get(builder.getContext(), blockArgTps, mlir::TypeRange({v.getType()}))
+  );
 
   builder.setInsertionPointAfter(lambdaOp);
   return lambdaOp;
@@ -115,7 +116,31 @@ mlir::Value translateExpr(mlir::OpBuilder& builder, ExprNode* expr, LetContext& 
       args.push_back(translateExpr(builder, call->getArg(i), ctx));
     }
     // TODO return type. return could be function
-    return builder.create<mlir::letalg::ApplyOp>(loc, builder.getI32Type(), fn, args);
+    auto ft = mlir::dyn_cast_or_null<mlir::FunctionType>(fn.getType());
+    if (!ft) {
+      throw std::invalid_argument("apply fn is not function type: " + call->dump());
+    }
+    auto returnTp = ft.getResult(0);
+    // TODO type check
+    if (args.size() != ft.getInputs().size()) {
+      std::vector<mlir::Type> restArgs;
+      for (size_t i = args.size(); i < ft.getInputs().size(); i ++) {
+        restArgs.push_back(ft.getInput(i));
+      }
+      returnTp = mlir::FunctionType::get(builder.getContext(), restArgs, mlir::TypeRange({returnTp}));
+    }
+    return builder.create<mlir::letalg::ApplyOp>(loc, returnTp, fn, args);
+  } else if (kind == ExprNode::Kind_If) {
+    auto ifNode = reinterpret_cast<IfExprNode*>(expr);
+    return builder.create<mlir::scf::IfOp>(loc, translateExpr(builder, ifNode->getCond(), ctx),
+      [&](mlir::OpBuilder& builder, mlir::Location loc) {
+        auto v = translateExpr(builder, ifNode->getThen(), ctx);
+        builder.create<mlir::scf::YieldOp>(loc, v);
+      }, [&](mlir::OpBuilder& builder, mlir::Location loc) {
+        auto v = translateExpr(builder, ifNode->getEls(), ctx);
+        builder.create<mlir::scf::YieldOp>(loc, v);
+      }
+    ).getResult(0);
   } else if (kind == ExprNode::Kind_Var) {
     auto var = reinterpret_cast<VarExprNode*>(expr);
     auto idx = ctx.find(var->getName());

@@ -29,6 +29,9 @@ void tokenize(std::string& input, std::vector<std::string>& tokens) {
   }
 }
 
+// This is a roughly crafted LL style parser. It's not very carefully designed but just used for proof 
+// of concept for the later MLIR logics. It's not very important to generate all correct AST node for
+// every raw input, but generate some correct AST node for later MLIR codegen part.
 std::unique_ptr<ExprNode> parse(std::string& input) {
   std::vector<std::string> tokens;
   tokenize(input, tokens);
@@ -41,14 +44,12 @@ std::unique_ptr<ExprNode> parse(std::string& input) {
   std::vector<char> operators;
   std::unordered_set<std::string> fns;
   auto reduceOpt = [&](int start) {
-    printf("[reduceOpt] %d %lu %lu\n", start, operators.size(), stack.size());
+    // printf("[reduceOpt] %d %lu %lu\n", start, operators.size(), stack.size());
     if (stack[start]->getKind() == ExprNode::Kind_Var && fns.contains(stack[start]->dump())) {
-      for (size_t i = start+1; i < stack.size(); i ++) {
-
-      }
       auto fn = std::move(stack[start]);
-      stack.erase(stack.begin()); 
-      auto call = std::make_unique<CallExprNode>(std::move(fn), std::move(stack));
+      std::vector<std::unique_ptr<ExprNode>> args;
+      for (size_t i = start + 1; i < stack.size(); i ++) args.push_back(std::move(stack[i]));
+      auto call = std::make_unique<CallExprNode>(std::move(fn), std::move(args));
       stack.clear();
       stack.push_back(std::move(call));
       return;
@@ -73,7 +74,7 @@ std::unique_ptr<ExprNode> parse(std::string& input) {
     for (; i < tokens.size();) {
       auto& tok = tokens[i];
       // printf("[process tok] i: %lu tok: %s\n", i, tok.c_str());
-      if (tok == ";" || tok == "in") {
+      if (tok == ";" || tok == "in" || tok == "then" || tok == "else") {
         reduceOpt(stackPos);
         i++;
         return i;
@@ -102,7 +103,6 @@ std::unique_ptr<ExprNode> parse(std::string& input) {
           stack.pop_back();
           auto lambda = std::make_unique<LambdaExprNode>(var, args, std::move(decl));
           fns.insert(var);
-          // stack.push_back(std::move(lambda));
 
           next = parseExpr(next);
           auto body = std::move(stack.back());
@@ -113,6 +113,21 @@ std::unique_ptr<ExprNode> parse(std::string& input) {
           // TODO fns pop lambda
           return next;
         }
+      } else if (tok == "if") {
+        auto next = i + 1;
+        next = parseExpr(next);
+        auto cond = std::move(stack.back());
+        stack.pop_back();
+        next = parseExpr(next);
+        auto then = std::move(stack.back());
+        stack.pop_back();
+        next = parseExpr(next);
+        auto els = std::move(stack.back());
+        stack.pop_back();
+
+        auto ifNode = std::make_unique<IfExprNode>(std::move(cond), std::move(then), std::move(els));
+        stack.push_back(std::move(ifNode));
+        return next;
       } else if (tok[0] >= '0' && tok[0] <= '9') {
         int v = std::stoi(tok);
         auto num = std::make_unique<NumberExprNode>(v);

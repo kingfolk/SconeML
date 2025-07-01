@@ -78,7 +78,9 @@ def LetOp : LetAlg_Op<"let", [Pure]> {
 
   let arguments = (ins Variadic<AnyType>: $vars);
   let results = (outs AnyType: $res);
-  let regions = (region SizedRegion<1>);
+  let regions = (region SizedRegion<1>: $body);
+
+  let assemblyFormat = [{ ($vars^ `:` type($vars))? custom<CustRegion>($body)  `->` type($res) attr-dict-with-keyword }];
 }
 
 // - let f x = f x ..., contains one LambdaOp
@@ -96,7 +98,9 @@ def LambdaOp : LetAlg_Op<"lambda", [Pure]> {
 
   let arguments = (ins StrAttr: $name, Variadic<AnyType>: $vars);
   let results = (outs AnyType: $res);
-  let regions = (region SizedRegion<1>);
+  let regions = (region SizedRegion<1>: $body);
+
+  let assemblyFormat = [{ $name ($vars^ `:` type($vars))? custom<CustRegion>($body)  `->` type($res) attr-dict-with-keyword }];
 }
 
 def YieldOp : LetAlg_Op<"yield", [Pure,Terminator]> {
@@ -126,10 +130,9 @@ def ApplyOp : LetAlg_Op<"apply", [Pure]> {
 //     let mnemonic = "letalg_type";
 //     let summary = "An letalg type";
     
-//     // 可以定义参数
 //     let parameters = (ins "int":$width);
     
-//     // TableGen 会自动生成 parseType 和 printType
+//     // TableGen auto gen parseType, printType
 // }
 
 

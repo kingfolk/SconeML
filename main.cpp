@@ -30,7 +30,9 @@ int main(int argc, char **argv) {
   // std::string input = "let f x = let f1 y = y + 1 in f1 (x * 2)";
   // std::string input = "let x = 1 in let y = 2 in x + y";
   // std::string input = "let x = 1 in x + let y = 2 in y + 10";
-  std::string input = "let f x = x + 10 in f 2";
+  // std::string input = "let f x = x + 10 in f 2";
+  std::string input = "let f x y = x + y + 10 in f 2";
+  // std::string input = "let x = 1 in if x then x + 10 else 0";
   auto expr = cakeml::parse(input);
 
   
@@ -48,6 +50,7 @@ int main(int argc, char **argv) {
   context.getOrLoadDialect<letalg::LetAlgDialect>();
   context.getOrLoadDialect<func::FuncDialect>();
   context.getOrLoadDialect<arith::ArithDialect>();
+  context.getOrLoadDialect<scf::SCFDialect>();
 
   // Create a simple program using our dialect
   OpBuilder builder(&context);

@@ -17,6 +17,7 @@ public:
     Kind_Lambda,
     Kind_Seq,
     Kind_Call,
+    Kind_If,
     Kind_Print,
   };
 
@@ -142,10 +143,25 @@ public:
     std::string res = "call " + fn->dump() + "(";
     for (size_t i = 0; i < args.size(); i ++) {
       if (i != 0) res += ", ";
-      auto& arg = args[i];
-      res += arg->dump();
+      res += args[i]->dump();
     }
     return res + ")";
+  }
+};
+
+class IfExprNode : public ExprNode {
+  std::string var;
+  std::unique_ptr<ExprNode> cond, then, els;
+
+public:
+  IfExprNode(std::unique_ptr<ExprNode> cond, std::unique_ptr<ExprNode> then, std::unique_ptr<ExprNode> els)
+      : ExprNode(Kind_If), cond(std::move(cond)), then(std::move(then)), els(std::move(els)) {}
+
+  ExprNode* getCond() { return cond.get(); }
+  ExprNode* getThen() { return then.get(); }
+  ExprNode* getEls() { return els.get(); }
+  std::string dump() override {
+    return "if (" + cond->dump() + ")\n  {" + then->dump()  + "}\n  {" + els->dump() + "}";
   }
 };
 
