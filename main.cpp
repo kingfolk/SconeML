@@ -2,6 +2,8 @@
 #include "LetAlgDialect.h"
 #include "Parser.h"
 #include "AstToLetAlg.h"
+#include "Conversion/ClosureConversion.h"
+#include "Conversion/LiftLocals.h"
 
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -31,8 +33,10 @@ int main(int argc, char **argv) {
   // std::string input = "let x = 1 in let y = 2 in x + y";
   // std::string input = "let x = 1 in x + let y = 2 in y + 10";
   // std::string input = "let f x = x + 10 in f 2";
-  std::string input = "let f x y = x + y + 10 in f 2";
+  // std::string input = "let f x y = x + y + 10 in f 2";
   // std::string input = "let x = 1 in if x then x + 10 else 0";
+  // std::string input = "let a = 1 in let f x = x + 10 in f a";
+  std::string input = "let a = 1 in let f x = x + a + 10 in f 2";
   auto expr = cakeml::parse(input);
 
   
@@ -68,6 +72,15 @@ int main(int argc, char **argv) {
 
   auto last = cakeml::translate(builder, expr.get());
   builder.create<mlir::letalg::YieldOp>(loc, last.getType(), last);
+
+  mlir::PassManager pm(&context);
+  // Add your custom pass to the pass manager
+  pm.addPass(cakeml::createClosureConversionPass());
+  pm.addPass(cakeml::createLiftLocalsPass());
+  if (mlir::failed(pm.run(module))) {
+    llvm::errs() << "Pass run failed\n";
+    return 1;
+  }
 
   // Print the generated MLIR
   llvm::outs() << "Generated MLIR:\n";

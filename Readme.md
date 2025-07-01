@@ -93,3 +93,50 @@ module {
 ```
 
 `%1 = letalg.let` return type is `(i32) -> i32`. This `let` op take function type `(i32, i32) -> i32` and only provide the first parameter and return the curried function.
+
+## Passes
+
+There only a few rewriting/optimization passes right now. It's in very primitive stage. An example of rewriting before and after
+
+input is following. lambda `f` has a capture variable from outer closure.
+```
+let a = 1 in let f x = x + a + 10 in f 2
+```
+
+before. Following is initial form of letalg representation, which is nested. This nested representation is good expressive for input in natural because ml's syntax is deeply nested.
+```
+func.func @test_function() {
+  %0 = letalg.let (){
+    %c1_i32 = arith.constant 1 : i32
+    %2 = letalg.lambda "f" (%arg0: i32){
+      %5 = arith.addi %arg0, %c1_i32 : i32
+      %c10_i32 = arith.constant 10 : i32
+      %6 = arith.addi %5, %c10_i32 : i32
+      %7 = "letalg.yield"(%6) : (i32) -> i32
+    } -> (i32) -> i32
+    %c2_i32 = arith.constant 2 : i32
+    %3 = "letalg.apply"(%2, %c2_i32) : ((i32) -> i32, i32) -> i32
+    %4 = "letalg.yield"(%3) : (i32) -> i32
+  } -> i32
+  %1 = "letalg.yield"(%0) : (i32) -> i32
+}
+```
+
+after. Passes like Closure conversion and declaration lift denest the structure. It will made easy to lower to next step low level dialect.
+```
+func.func @test_function() {
+  %c1_i32 = arith.constant 1 : i32
+  %0 = letalg.lambda "f" (%arg0: i32,%arg1: i32){
+    %3 = arith.addi %arg1, %arg0 : i32
+    %c10_i32 = arith.constant 10 : i32
+    %4 = arith.addi %3, %c10_i32 : i32
+    %5 = "letalg.yield"(%4) : (i32) -> i32
+  } -> (i32) -> i32
+  %1 = letalg.let %c1_i32, %0 : i32, (i32) -> i32 (%arg0: i32,%arg1: (i32) -> i32){
+    %c2_i32 = arith.constant 2 : i32
+    %3 = "letalg.apply"(%arg1, %arg0, %c2_i32) : ((i32) -> i32, i32, i32) -> i32
+    %4 = "letalg.yield"(%3) : (i32) -> i32
+  } -> i32 attributes {declCnt = 2 : i32}
+  %2 = "letalg.yield"(%1) : (i32) -> i32
+}
+```

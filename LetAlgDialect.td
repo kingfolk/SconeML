@@ -76,7 +76,7 @@ def LetOp : LetAlg_Op<"let", [Pure]> {
     The "let" operation performs a lambda abstraction.
   }];
 
-  let arguments = (ins Variadic<AnyType>: $vars);
+  let arguments = (ins I32Attr: $declCnt, Variadic<AnyType>: $vars);
   let results = (outs AnyType: $res);
   let regions = (region SizedRegion<1>: $body);
 

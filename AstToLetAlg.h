@@ -11,39 +11,56 @@
 #include <vector>
 
 namespace cakeml {
-struct LetContext {
+struct TranslateContext {
   std::vector<std::tuple<std::string, int>> variables;
   std::vector<mlir::Value> values;
   mlir::Region* region;
+  TranslateContext* parent;
 
   void push(std::string name, mlir::Value arg) {
     variables.push_back(std::make_tuple(name, variables.size()));
     values.push_back(arg);
   }
 
-  int find(std::string name) {
+  mlir::Value find(std::string name) {
+    if (values.size() > 0) {
+      for (size_t i = 0; i < variables.size(); i ++) {
+        if (std::get<0>(variables[i]) == name) {
+          return values[i];
+        }
+      }
+      return nullptr;
+    }
+
+    if (!region) throw std::invalid_argument("region not set in translate context");
+
     for (size_t i = 0; i < variables.size(); i ++) {
       if (std::get<0>(variables[i]) == name) {
-        return i;
+        return region->getArgument(i);
       }
     }
-    return -1;
-  }
-
-  mlir::Value getArgument(size_t index) {
-    return region->getArgument(index);
+    if (!parent) return nullptr;
+    return parent->find(name);
   }
 };
 
-mlir::Value translateExpr(mlir::OpBuilder& builder, ExprNode* expr, LetContext& ctx);
+mlir::Value translateExpr(mlir::OpBuilder& builder, ExprNode* expr, TranslateContext& ctx);
 
-mlir::Value translateLet(mlir::OpBuilder& builder, LetExprNode* let) {
+mlir::Value translateLet(mlir::OpBuilder& builder, LetExprNode* let, TranslateContext& parent) {
   auto loc = builder.getUnknownLoc();
-  LetContext ctx;
+  TranslateContext ctx;
+  ctx.parent = &parent;
   cakeml::ExprNode *finalBody;
+  auto letOp = builder.create<mlir::letalg::LetOp>(loc, builder.getI32Type(), 0, mlir::ValueRange{});
+  mlir::Region& region = letOp.getRegion();
+  mlir::Block* scopeBlock = builder.createBlock(&region);
+  ctx.region = &region;
+
+  builder.setInsertionPointToStart(scopeBlock);
   std::function<void(LetExprNode*)> processLet = [&](LetExprNode* letNode) {
     auto name = letNode->getVar();
-    ctx.push(name, translateExpr(builder, letNode->getDecl(), ctx));
+    auto arg = translateExpr(builder, letNode->getDecl(), ctx);
+    ctx.push(name, arg);
 
     auto body = letNode->getBody();
     if (body->getKind() == ExprNode::Kind_Let) {
@@ -53,17 +70,7 @@ mlir::Value translateLet(mlir::OpBuilder& builder, LetExprNode* let) {
     }
   };
   processLet(let);
-
-  auto letOp = builder.create<mlir::letalg::LetOp>(loc, builder.getI32Type(), ctx.values);
-  mlir::Region& region = letOp.getRegion();
-  mlir::Block* scopeBlock = builder.createBlock(&region);
-  std::vector<mlir::Type> blockArgTps;
-  for (auto& arg : ctx.values) {
-    blockArgTps.push_back(arg.getType());
-  }
-  region.addArguments(blockArgTps,  std::vector<mlir::Location>(blockArgTps.size(), loc));
-  ctx.region = &region;
-  builder.setInsertionPointToStart(scopeBlock);
+  letOp.setDeclCnt(ctx.values.size());
   auto v = translateExpr(builder, finalBody, ctx);
   builder.create<mlir::letalg::YieldOp>(loc, v.getType(), v);
   letOp.getResult().setType(v.getType());
@@ -72,7 +79,7 @@ mlir::Value translateLet(mlir::OpBuilder& builder, LetExprNode* let) {
   return letOp;
 }
 
-mlir::Value translateLambda(mlir::OpBuilder& builder, LambdaExprNode* lambda) {
+mlir::Value translateLambda(mlir::OpBuilder& builder, LambdaExprNode* lambda, TranslateContext& parent) {
   auto loc = builder.getUnknownLoc();
 
   std::vector<mlir::Value> vals{};
@@ -80,7 +87,8 @@ mlir::Value translateLambda(mlir::OpBuilder& builder, LambdaExprNode* lambda) {
   mlir::Region& region = lambdaOp.getRegion();
   mlir::Block* scopeBlock = builder.createBlock(&region);
 
-  LetContext ctx;
+  TranslateContext ctx;
+  ctx.parent = &parent;
   std::vector<mlir::Type> blockArgTps;
   for (auto& arg : lambda->getArgs()) {
     ctx.variables.push_back(std::make_tuple(arg, ctx.variables.size()));
@@ -99,15 +107,15 @@ mlir::Value translateLambda(mlir::OpBuilder& builder, LambdaExprNode* lambda) {
   return lambdaOp;
 }
 
-mlir::Value translateExpr(mlir::OpBuilder& builder, ExprNode* expr, LetContext& ctx) {
+mlir::Value translateExpr(mlir::OpBuilder& builder, ExprNode* expr, TranslateContext& ctx) {
   auto loc = builder.getUnknownLoc();
   auto kind = expr->getKind();
   if (kind == ExprNode::Kind_Let) {
     auto let = reinterpret_cast<LetExprNode*>(expr);
-    return translateLet(builder, let);
+    return translateLet(builder, let, ctx);
   } else if (kind == ExprNode::Kind_Lambda) {
     auto lambda = reinterpret_cast<LambdaExprNode*>(expr);
-    return translateLambda(builder, lambda);
+    return translateLambda(builder, lambda, ctx);
   } else if (kind == ExprNode::Kind_Call) {
     auto call = reinterpret_cast<CallExprNode*>(expr);
     auto fn = translateExpr(builder, call->getFn(), ctx);
@@ -143,11 +151,11 @@ mlir::Value translateExpr(mlir::OpBuilder& builder, ExprNode* expr, LetContext& 
     ).getResult(0);
   } else if (kind == ExprNode::Kind_Var) {
     auto var = reinterpret_cast<VarExprNode*>(expr);
-    auto idx = ctx.find(var->getName());
-    if (idx == -1) {
+    auto found = ctx.find(var->getName());
+    if (!found) {
       throw std::invalid_argument("variable not found " + expr->dump());
     }
-    return ctx.getArgument(idx);
+    return found;
   } else if (kind == ExprNode::Kind_Num) {
     auto num = reinterpret_cast<NumberExprNode*>(expr);
     mlir::IntegerAttr i32Attr = builder.getIntegerAttr(builder.getI32Type(), num->getValue());
@@ -166,7 +174,7 @@ mlir::Value translateExpr(mlir::OpBuilder& builder, ExprNode* expr, LetContext& 
 }
 
 mlir::Value translate(mlir::OpBuilder& builder, ExprNode* expr) {
-  LetContext ctx;
+  TranslateContext ctx;
   return translateExpr(builder, expr, ctx);
 }
 }
