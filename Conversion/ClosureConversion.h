@@ -1,5 +1,5 @@
-#ifndef CAKEML_CLOSURE_CONVERSION_H
-#define CAKEML_CLOSURE_CONVERSION_H
+#ifndef SCONEML_CLOSURE_CONVERSION_H
+#define SCONEML_CLOSURE_CONVERSION_H
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/PatternMatch.h"
@@ -7,7 +7,7 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
-namespace cakeml {
+namespace sconeml {
 struct ClosureConversionPass : public mlir::PassWrapper<ClosureConversionPass, mlir::OperationPass<mlir::ModuleOp>> {
   virtual llvm::StringRef getArgument() const override { return "closure-conversion"; }
 
@@ -37,7 +37,7 @@ struct ClosureConversionPass : public mlir::PassWrapper<ClosureConversionPass, m
         auto& region = op->getRegion(0);
         region.insertArgument((unsigned int)0, use.getType(), op->getLoc());
         for (auto app : op->getUsers()) {
-          auto applyOp = mlir::dyn_cast_or_null<mlir::letalg::ApplyOp>(app);
+          auto applyOp = mlir::dyn_cast_or_null<sconeml::letalg::ApplyOp>(app);
           // TODO consider let
           if (!applyOp) throw std::invalid_argument("user of lambda is not apply op");
           if (use.getParentRegion() == app->getParentRegion()) {
@@ -63,12 +63,12 @@ struct ClosureConversionPass : public mlir::PassWrapper<ClosureConversionPass, m
     getOperation().walk<mlir::WalkOrder::PreOrder>([&](mlir::Operation* op) {
       // printf("  !!! op\n");
       // op->dump();
-      if (auto letOp = mlir::dyn_cast_or_null<mlir::letalg::LetOp>(op)) {
+      if (auto letOp = mlir::dyn_cast_or_null<sconeml::letalg::LetOp>(op)) {
         closures.push_back(Closure{
           op: op,
           region: &letOp.getRegion()
         });
-      } else if (auto lambdaOp = mlir::dyn_cast_or_null<mlir::letalg::LambdaOp>(op)) {
+      } else if (auto lambdaOp = mlir::dyn_cast_or_null<sconeml::letalg::LambdaOp>(op)) {
         closures.push_back(Closure{
           op: op,
           region: &lambdaOp.getRegion()
@@ -96,4 +96,4 @@ struct ClosureConversionPass : public mlir::PassWrapper<ClosureConversionPass, m
 std::unique_ptr<mlir::Pass> createClosureConversionPass() { return std::make_unique<ClosureConversionPass>(); }
 }
 
-#endif // CAKEML_CLOSURE_CONVERSION_H
+#endif // SCONEML_CLOSURE_CONVERSION_H

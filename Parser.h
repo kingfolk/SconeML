@@ -1,5 +1,5 @@
-#ifndef CAKEML_PARSER_H
-#define CAKEML_PARSER_H
+#ifndef SCONEML_PARSER_H
+#define SCONEML_PARSER_H
 
 #include <memory>
 #include <string>
@@ -8,7 +8,7 @@
 #include <memory>
 #include "Ast.h"
 
-namespace cakeml {
+namespace sconeml {
 
 void tokenize(std::string& input, std::vector<std::string>& tokens) {
   std::string tok;
@@ -157,4 +157,4 @@ std::unique_ptr<ExprNode> parse(std::string& input) {
 }
 }
 
-#endif // CAKEML_PARSER_H
+#endif // SCONEML_PARSER_H

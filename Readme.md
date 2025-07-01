@@ -1,6 +1,6 @@
-# CakeML
+# SconeML
 
-A MLIR recipe for ocaml cake. Taste of ML language from MLIR perspective.
+A MLIR recipe for ocaml. Taste of ML language from MLIR perspective. Hope taste like best baked scone!
 
 **This is a ongoing project. It's a proof of concept for using MLIR for functional language syntax and will not be suitable for production in any time. following features may be done in future**
 

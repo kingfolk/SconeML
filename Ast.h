@@ -1,11 +1,11 @@
-#ifndef CAKEML_AST_H
-#define CAKEML_AST_H
+#ifndef SCONEML_AST_H
+#define SCONEML_AST_H
 
 #include <string>
 #include <vector>
 #include <memory>
 
-namespace cakeml {
+namespace sconeml {
 
 class ExprNode {
 public:
@@ -179,4 +179,4 @@ public:
 };
 }
 
-#endif // CAKEML_AST_H
+#endif // SCONEML_AST_H

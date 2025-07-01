@@ -37,7 +37,7 @@ int main(int argc, char **argv) {
   // std::string input = "let x = 1 in if x then x + 10 else 0";
   // std::string input = "let a = 1 in let f x = x + 10 in f a";
   std::string input = "let a = 1 in let f x = x + a + 10 in f 2";
-  auto expr = cakeml::parse(input);
+  auto expr = sconeml::parse(input);
 
   
   // Register any command line options.
@@ -51,7 +51,7 @@ int main(int argc, char **argv) {
   MLIRContext context;
   
   // Load dialects including our letalg dialect
-  context.getOrLoadDialect<letalg::LetAlgDialect>();
+  context.getOrLoadDialect<sconeml::letalg::LetAlgDialect>();
   context.getOrLoadDialect<func::FuncDialect>();
   context.getOrLoadDialect<arith::ArithDialect>();
   context.getOrLoadDialect<scf::SCFDialect>();
@@ -70,13 +70,13 @@ int main(int argc, char **argv) {
   auto &entryBlock = *function.addEntryBlock();
   builder.setInsertionPointToStart(&entryBlock);
 
-  auto last = cakeml::translate(builder, expr.get());
-  builder.create<mlir::letalg::YieldOp>(loc, last.getType(), last);
+  auto last = sconeml::translate(builder, expr.get());
+  builder.create<sconeml::letalg::YieldOp>(loc, last.getType(), last);
 
   mlir::PassManager pm(&context);
   // Add your custom pass to the pass manager
-  pm.addPass(cakeml::createClosureConversionPass());
-  pm.addPass(cakeml::createLiftLocalsPass());
+  pm.addPass(sconeml::createClosureConversionPass());
+  pm.addPass(sconeml::createLiftLocalsPass());
   if (mlir::failed(pm.run(module))) {
     llvm::errs() << "Pass run failed\n";
     return 1;

@@ -1,5 +1,5 @@
-#ifndef CAKEML_LETALG_DIALECT_H
-#define CAKEML_LETALG_DIALECT_H
+#ifndef SCONEML_LETALG_DIALECT_H
+#define SCONEML_LETALG_DIALECT_H
 
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/OpDefinition.h"
@@ -16,4 +16,4 @@
 #define GET_OP_CLASSES
 #include "LetAlgDialectOps.h.inc"
 
-#endif // CAKEML_LETALG_DIALECT_H
+#endif // SCONEML_LETALG_DIALECT_H

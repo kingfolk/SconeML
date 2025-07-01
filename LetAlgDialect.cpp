@@ -9,7 +9,7 @@
 #include "llvm/ADT/TypeSwitch.h"
 
 using namespace mlir;
-using namespace mlir::letalg;
+using namespace sconeml::letalg;
 
 // BORROW FROM lingodb. Not original
 ParseResult parseCustRegion(OpAsmParser& parser, Region& result) {

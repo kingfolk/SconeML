@@ -1,5 +1,5 @@
-#ifndef CAKEML_AST_TO_LETALG_H
-#define CAKEML_AST_TO_LETALG_H
+#ifndef SCONEML_AST_TO_LETALG_H
+#define SCONEML_AST_TO_LETALG_H
 
 #include "Ast.h"
 #include "LetAlgDialect.h"
@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace cakeml {
+namespace sconeml {
 struct TranslateContext {
   std::vector<std::tuple<std::string, int>> variables;
   std::vector<mlir::Value> values;
@@ -50,8 +50,8 @@ mlir::Value translateLet(mlir::OpBuilder& builder, LetExprNode* let, TranslateCo
   auto loc = builder.getUnknownLoc();
   TranslateContext ctx;
   ctx.parent = &parent;
-  cakeml::ExprNode *finalBody;
-  auto letOp = builder.create<mlir::letalg::LetOp>(loc, builder.getI32Type(), 0, mlir::ValueRange{});
+  sconeml::ExprNode *finalBody;
+  auto letOp = builder.create<sconeml::letalg::LetOp>(loc, builder.getI32Type(), 0, mlir::ValueRange{});
   mlir::Region& region = letOp.getRegion();
   mlir::Block* scopeBlock = builder.createBlock(&region);
   ctx.region = &region;
@@ -72,7 +72,7 @@ mlir::Value translateLet(mlir::OpBuilder& builder, LetExprNode* let, TranslateCo
   processLet(let);
   letOp.setDeclCnt(ctx.values.size());
   auto v = translateExpr(builder, finalBody, ctx);
-  builder.create<mlir::letalg::YieldOp>(loc, v.getType(), v);
+  builder.create<sconeml::letalg::YieldOp>(loc, v.getType(), v);
   letOp.getResult().setType(v.getType());
 
   builder.setInsertionPointAfter(letOp);
@@ -83,7 +83,7 @@ mlir::Value translateLambda(mlir::OpBuilder& builder, LambdaExprNode* lambda, Tr
   auto loc = builder.getUnknownLoc();
 
   std::vector<mlir::Value> vals{};
-  auto lambdaOp = builder.create<mlir::letalg::LambdaOp>(loc, builder.getI32Type(), lambda->getFn(), vals);
+  auto lambdaOp = builder.create<sconeml::letalg::LambdaOp>(loc, builder.getI32Type(), lambda->getFn(), vals);
   mlir::Region& region = lambdaOp.getRegion();
   mlir::Block* scopeBlock = builder.createBlock(&region);
 
@@ -98,7 +98,7 @@ mlir::Value translateLambda(mlir::OpBuilder& builder, LambdaExprNode* lambda, Tr
   ctx.region = &region;
   builder.setInsertionPointToStart(scopeBlock);
   auto v = translateExpr(builder, lambda->getBody(), ctx);
-  builder.create<mlir::letalg::YieldOp>(loc, v.getType(), v);
+  builder.create<sconeml::letalg::YieldOp>(loc, v.getType(), v);
   lambdaOp.getResult().setType(
     mlir::FunctionType::get(builder.getContext(), blockArgTps, mlir::TypeRange({v.getType()}))
   );
@@ -137,7 +137,7 @@ mlir::Value translateExpr(mlir::OpBuilder& builder, ExprNode* expr, TranslateCon
       }
       returnTp = mlir::FunctionType::get(builder.getContext(), restArgs, mlir::TypeRange({returnTp}));
     }
-    return builder.create<mlir::letalg::ApplyOp>(loc, returnTp, fn, args);
+    return builder.create<sconeml::letalg::ApplyOp>(loc, returnTp, fn, args);
   } else if (kind == ExprNode::Kind_If) {
     auto ifNode = reinterpret_cast<IfExprNode*>(expr);
     return builder.create<mlir::scf::IfOp>(loc, translateExpr(builder, ifNode->getCond(), ctx),
@@ -179,4 +179,4 @@ mlir::Value translate(mlir::OpBuilder& builder, ExprNode* expr) {
 }
 }
 
-#endif // CAKEML_AST_TO_LETALG_H
+#endif // SCONEML_AST_TO_LETALG_H

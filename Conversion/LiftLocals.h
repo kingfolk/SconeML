@@ -1,5 +1,5 @@
-#ifndef CAKEML_LIFT_LOCALS_H
-#define CAKEML_LIFT_LOCALS_H
+#ifndef SCONEML_LIFT_LOCALS_H
+#define SCONEML_LIFT_LOCALS_H
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/PatternMatch.h"
@@ -7,14 +7,14 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
-namespace cakeml {
+namespace sconeml {
 struct LiftLocalsPass : public mlir::PassWrapper<LiftLocalsPass, mlir::OperationPass<mlir::ModuleOp>> {
   virtual llvm::StringRef getArgument() const override { return "lift-locals"; }
 
   void runOnOperation() override {
     mlir::OpBuilder builder(getOperation().getContext());
     getOperation().walk<mlir::WalkOrder::PreOrder>([&](mlir::Operation* op) {
-      if (auto letOp = mlir::dyn_cast_or_null<mlir::letalg::LetOp>(op)) {
+      if (auto letOp = mlir::dyn_cast_or_null<sconeml::letalg::LetOp>(op)) {
         auto& region = letOp.getRegion();
         std::vector<mlir::Operation*> ops;
         std::vector<mlir::Value> inputs;
@@ -41,4 +41,4 @@ struct LiftLocalsPass : public mlir::PassWrapper<LiftLocalsPass, mlir::Operation
 std::unique_ptr<mlir::Pass> createLiftLocalsPass() { return std::make_unique<LiftLocalsPass>(); }
 
 }
-#endif // CAKEML_LIFT_LOCALS_H
+#endif // SCONEML_LIFT_LOCALS_H

@@ -17,7 +17,7 @@ def LetAlg_Dialect : Dialect {
   let description = [{
     This dialect contains simple operations for demonstration purposes.
   }];
-  let cppNamespace = "::mlir::letalg";
+  let cppNamespace = "::sconeml::letalg";
   
   let useDefaultTypePrinterParser = 1;
   let extraClassDeclaration = [{
