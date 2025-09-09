@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# 构建脚本 - build.sh
-
-# 设置颜色输出
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

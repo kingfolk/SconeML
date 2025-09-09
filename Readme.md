@@ -10,7 +10,7 @@ language syntax:
 
 compiler opts:
 - [ ] Alpha transformation to solve name conflict
-- [ ] Variable capture as formal parameter
+- [x] Variable capture as formal parameter
 - [ ] Inline let/lambda to some extent
 
 I would like to achieve these above features based on optimization passes or extending LetAlg dialect we already have. I would also like to finish a compact runtime data structure design
@@ -28,17 +28,18 @@ in LetAlg dialect
 ```llvm
 module {
   func.func @test_function() {
-    %c1_i32 = arith.constant 1 : i32
-    %c2_i32 = arith.constant 2 : i32
-    %0 = letalg.let %c1_i32, %c2_i32 : i32, i32 (%arg0: i32,%arg1: i32){
-      %2 = arith.addi %arg0, %arg1 : i32
+    %0 = letalg.let (){
+      %c1_i32 = arith.constant 1 : i32
+      %c2_i32 = arith.constant 2 : i32
+      %2 = arith.addi %c1_i32, %c2_i32 : i32
       %3 = "letalg.yield"(%2) : (i32) -> i32
-    } -> i32
+    } -> i32 attributes {declCnt = 2 : i32}
     %1 = "letalg.yield"(%0) : (i32) -> i32
   }
 }
 ```
-Adjacent `let` variable bindings will be defined in same block of LetAlg dialect. This expression, `%0 = letalg.let %c1_i32, %c2_i32 : i32, i32 (%arg0: i32,%arg1: i32)`, expresses actual parameter `%c1_i32` and `%c2_i32` will be bound to formal parameter `%arg0` and `%arg1`.
+
+This is dumping before passes. It shows the primitive form of letalg. We can still see the scope info like two constants are defined inside `let` op's region.
 
 - lambda
 ```ocaml
@@ -49,22 +50,22 @@ in LetAlg dialect
 ```llvm
 module {
   func.func @test_function() {
-    %0 = letalg.lambda "f" (%arg0: i32){
-      %c10_i32 = arith.constant 10 : i32
-      %3 = arith.addi %arg0, %c10_i32 : i32
-      %4 = "letalg.yield"(%3) : (i32) -> i32
-    } -> (i32) -> i32
-    %1 = letalg.let %0 : (i32) -> i32 (%arg0: (i32) -> i32){
+    %0 = letalg.let (){
+      %2 = letalg.lambda "f" (%arg0: i32){
+        %c10_i32 = arith.constant 10 : i32
+        %5 = arith.addi %arg0, %c10_i32 : i32
+        %6 = "letalg.yield"(%5) : (i32) -> i32
+      } -> (i32) -> i32
       %c2_i32 = arith.constant 2 : i32
-      %3 = "letalg.apply"(%arg0, %c2_i32) : ((i32) -> i32, i32) -> i32
+      %3 = "letalg.apply"(%2, %c2_i32) : ((i32) -> i32, i32) -> i32
       %4 = "letalg.yield"(%3) : (i32) -> i32
-    } -> i32
-    %2 = "letalg.yield"(%1) : (i32) -> i32
+    } -> i32 attributes {declCnt = 1 : i32}
+    %1 = "letalg.yield"(%0) : (i32) -> i32
   }
 }
 ```
 
-`%1 = letalg.let %0 : (i32) -> i32 (%arg0: (i32) -> i32){` expression `let` op take a function type argument `(i32) -> i32`: `%arg0` as formal parameter and `%0` as actual parameter.
+`lambda` is a callable op and `apply` is a call op.
 
 - currying
 
@@ -76,35 +77,37 @@ in LetAlg dialect
 ```llvm
 module {
   func.func @test_function() {
-    %0 = letalg.lambda "f" (%arg0: i32,%arg1: i32){
-      %3 = arith.addi %arg0, %arg1 : i32
-      %c10_i32 = arith.constant 10 : i32
-      %4 = arith.addi %3, %c10_i32 : i32
-      %5 = "letalg.yield"(%4) : (i32) -> i32
-    } -> (i32, i32) -> i32
-    %1 = letalg.let %0 : (i32, i32) -> i32 (%arg0: (i32, i32) -> i32){
+    %0 = letalg.let (){
+      %2 = letalg.lambda "f" (%arg0: i32,%arg1: i32){
+        %5 = arith.addi %arg0, %arg1 : i32
+        %c10_i32 = arith.constant 10 : i32
+        %6 = arith.addi %5, %c10_i32 : i32
+        %7 = "letalg.yield"(%6) : (i32) -> i32
+      } -> (i32, i32) -> i32
       %c2_i32 = arith.constant 2 : i32
-      %3 = "letalg.apply"(%arg0, %c2_i32) : ((i32, i32) -> i32, i32) -> ((i32) -> i32)
+      %3 = "letalg.apply"(%2, %c2_i32) : ((i32, i32) -> i32, i32) -> ((i32) -> i32)
       %4 = "letalg.yield"(%3) : ((i32) -> i32) -> ((i32) -> i32)
-    } -> (i32) -> i32
-    %2 = "letalg.yield"(%1) : ((i32) -> i32) -> ((i32) -> i32)
+    } -> (i32) -> i32 attributes {declCnt = 1 : i32}
+    %1 = "letalg.yield"(%0) : ((i32) -> i32) -> ((i32) -> i32)
   }
 }
 ```
 
-`%1 = letalg.let` return type is `(i32) -> i32`. This `let` op take function type `(i32, i32) -> i32` and only provide the first parameter and return the curried function.
+`%0 = letalg.let` return type is `(i32) -> i32`. This `let` op take function type `(i32, i32) -> i32` and only provide the first parameter and return the curried function.
 
 ## Passes
 
 There only a few rewriting/optimization passes right now. It's in very primitive stage. An example of rewriting before and after
 
+Current passes mainly works on closure and scope, like erase scope(`let`) and capture as parameters of closure. It will made easy to lower to next step low level dialect.
+
 input is following. lambda `f` has a capture variable from outer closure.
-```
+```ocaml
 let a = 1 in let f x = x + a + 10 in f 2
 ```
 
-before. Following is initial form of letalg representation, which is nested. This nested representation is good expressive for input in natural because ml's syntax is deeply nested.
-```
+__before__. Following is initial form of letalg representation, which is nested. This nested representation is good expressive for input in natural because ml's syntax is deeply nested.
+```llvm
 func.func @test_function() {
   %0 = letalg.let (){
     %c1_i32 = arith.constant 1 : i32
@@ -122,8 +125,9 @@ func.func @test_function() {
 }
 ```
 
-after. Passes like Closure conversion and declaration lift denest the structure. It will made easy to lower to next step low level dialect.
-```
+__after__. All `let` ops are eliminated. The op structure is less nested but in a flat way.
+
+```llvm
 func.func @test_function() {
   %c1_i32 = arith.constant 1 : i32
   %0 = letalg.lambda "f" (%arg0: i32,%arg1: i32){
@@ -132,11 +136,8 @@ func.func @test_function() {
     %4 = arith.addi %3, %c10_i32 : i32
     %5 = "letalg.yield"(%4) : (i32) -> i32
   } -> (i32) -> i32
-  %1 = letalg.let %c1_i32, %0 : i32, (i32) -> i32 (%arg0: i32,%arg1: (i32) -> i32){
-    %c2_i32 = arith.constant 2 : i32
-    %3 = "letalg.apply"(%arg1, %arg0, %c2_i32) : ((i32) -> i32, i32, i32) -> i32
-    %4 = "letalg.yield"(%3) : (i32) -> i32
-  } -> i32 attributes {declCnt = 2 : i32}
+  %c2_i32 = arith.constant 2 : i32
+  %1 = "letalg.apply"(%0, %c1_i32, %c2_i32) : ((i32) -> i32, i32, i32) -> i32
   %2 = "letalg.yield"(%1) : (i32) -> i32
 }
 ```

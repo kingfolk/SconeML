@@ -63,12 +63,7 @@ struct ClosureConversionPass : public mlir::PassWrapper<ClosureConversionPass, m
     getOperation().walk<mlir::WalkOrder::PreOrder>([&](mlir::Operation* op) {
       // printf("  !!! op\n");
       // op->dump();
-      if (auto letOp = mlir::dyn_cast_or_null<sconeml::letalg::LetOp>(op)) {
-        closures.push_back(Closure{
-          op: op,
-          region: &letOp.getRegion()
-        });
-      } else if (auto lambdaOp = mlir::dyn_cast_or_null<sconeml::letalg::LambdaOp>(op)) {
+      if (auto lambdaOp = mlir::dyn_cast_or_null<sconeml::letalg::LambdaOp>(op)) {
         closures.push_back(Closure{
           op: op,
           region: &lambdaOp.getRegion()

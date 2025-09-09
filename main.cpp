@@ -2,8 +2,8 @@
 #include "LetAlgDialect.h"
 #include "Parser.h"
 #include "AstToLetAlg.h"
+#include "Conversion/UnwrapLet.h"
 #include "Conversion/ClosureConversion.h"
-#include "Conversion/LiftLocals.h"
 
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -36,7 +36,9 @@ int main(int argc, char **argv) {
   // std::string input = "let f x y = x + y + 10 in f 2";
   // std::string input = "let x = 1 in if x then x + 10 else 0";
   // std::string input = "let a = 1 in let f x = x + 10 in f a";
-  std::string input = "let a = 1 in let f x = x + a + 10 in f 2";
+  // std::string input = "let a = 1 in let f x = x + a + 10 in f 2";
+  // std::string input = "let a = 1 in let f x y = x + y + 10 in let b = 2 in f a b";
+  std::string input = "let a = 1 in let f x = x + let b = 10 in b in f a";
   auto expr = sconeml::parse(input);
 
   
@@ -73,17 +75,20 @@ int main(int argc, char **argv) {
   auto last = sconeml::translate(builder, expr.get());
   builder.create<sconeml::letalg::YieldOp>(loc, last.getType(), last);
 
+  llvm::outs() << "LetAlg MLIR:\n";
+  module.print(llvm::outs());
+  llvm::outs() << "\n";
+
   mlir::PassManager pm(&context);
   // Add your custom pass to the pass manager
+  pm.addPass(sconeml::createUnwrapLetPass());
   pm.addPass(sconeml::createClosureConversionPass());
-  pm.addPass(sconeml::createLiftLocalsPass());
   if (mlir::failed(pm.run(module))) {
     llvm::errs() << "Pass run failed\n";
     return 1;
   }
 
-  // Print the generated MLIR
-  llvm::outs() << "Generated MLIR:\n";
+  llvm::outs() << "After passes MLIR:\n";
   module.print(llvm::outs());
   llvm::outs() << "\n";
 
