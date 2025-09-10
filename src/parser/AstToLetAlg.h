@@ -2,7 +2,7 @@
 #define SCONEML_AST_TO_LETALG_H
 
 #include "Ast.h"
-#include "LetAlgDialect.h"
+#include "src/dialect/LetAlgDialect.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"

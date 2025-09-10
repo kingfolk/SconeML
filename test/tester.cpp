@@ -2,11 +2,11 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include "LetAlgDialect.h"
-#include "Parser.h"
-#include "AstToLetAlg.h"
-#include "Conversion/UnwrapLet.h"
-#include "Conversion/ClosureConversion.h"
+#include "src/dialect/LetAlgDialect.h"
+#include "src/parser/Parser.h"
+#include "src/parser/AstToLetAlg.h"
+#include "src/conversion/UnwrapLet.h"
+#include "src/conversion/ClosureConversion.h"
 
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"

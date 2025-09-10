@@ -29,7 +29,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 add_definitions(${LLVM_DEFINITIONS})
 
 # tablegen definition
-set(LLVM_TARGET_DEFINITIONS LetAlgDialect.td)
+set(LLVM_TARGET_DEFINITIONS src/dialect/LetAlgDialect.td)
 
 mlir_tablegen(LetAlgDialectDialect.h.inc -gen-dialect-decls)
 mlir_tablegen(LetAlgDialectDialect.cpp.inc -gen-dialect-defs)
@@ -41,8 +41,8 @@ mlir_tablegen(LetAlgDialectOps.cpp.inc -gen-op-defs)
 add_public_tablegen_target(LetAlgDialectIncGen)
 
 add_llvm_executable(mlir_example
-  main.cpp
-  LetAlgDialect.cpp
+  src/main.cpp
+  src/dialect/LetAlgDialect.cpp
 )
 
 target_compile_options(mlir_example PRIVATE -fexceptions)
@@ -80,7 +80,7 @@ target_include_directories(mlir_example
 
 add_llvm_executable(tester
   test/tester.cpp
-  LetAlgDialect.cpp
+  src/dialect/LetAlgDialect.cpp
 )
 
 target_compile_options(tester PRIVATE -fexceptions)
