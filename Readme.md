@@ -9,7 +9,7 @@ language syntax:
 - [ ] variant, tuple, list type
 
 compiler opts:
-- [ ] Alpha transformation to solve name conflict
+- [x] Alpha transformation to solve name conflict
 - [x] Variable capture as formal parameter
 - [ ] Inline let/lambda to some extent
 

@@ -43,9 +43,10 @@ if [ $? -ne 0 ]; then
 fi
 
 echo -e "${GREEN}Build success!${NC}"
-echo -e "${GREEN}Exec Path: ${BUILD_DIR}/mlir_example${NC}"
 
-echo -e "${GREEN}Run example...${NC}"
-./mlir_example
+# echo -e "${GREEN}Exec Path: ${BUILD_DIR}/mlir_example${NC}"
 
-echo -e "${GREEN}Complete!${NC}"
+# echo -e "${GREEN}Run example...${NC}"
+# ./mlir_example
+
+# echo -e "${GREEN}Complete!${NC}"

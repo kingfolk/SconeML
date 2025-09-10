@@ -24,7 +24,7 @@ struct TranslateContext {
 
   mlir::Value find(std::string name) {
     if (values.size() > 0) {
-      for (size_t i = 0; i < variables.size(); i ++) {
+      for (int i = variables.size() - 1; i >= 0; i --) {
         if (std::get<0>(variables[i]) == name) {
           return values[i];
         }
@@ -140,7 +140,12 @@ mlir::Value translateExpr(mlir::OpBuilder& builder, ExprNode* expr, TranslateCon
     return builder.create<sconeml::letalg::ApplyOp>(loc, returnTp, fn, args);
   } else if (kind == ExprNode::Kind_If) {
     auto ifNode = reinterpret_cast<IfExprNode*>(expr);
-    return builder.create<mlir::scf::IfOp>(loc, translateExpr(builder, ifNode->getCond(), ctx),
+    auto cond = translateExpr(builder, ifNode->getCond(), ctx);
+    if (cond.getType() != builder.getI1Type()) {
+      mlir::IntegerAttr zeroAttr = builder.getIntegerAttr(builder.getI32Type(), 0);
+      cond = builder.create<mlir::arith::CmpIOp>(loc, mlir::arith::CmpIPredicate::eq, cond, builder.create<mlir::arith::ConstantOp>(loc, zeroAttr));
+    }
+    return builder.create<mlir::scf::IfOp>(loc, cond,
       [&](mlir::OpBuilder& builder, mlir::Location loc) {
         auto v = translateExpr(builder, ifNode->getThen(), ctx);
         builder.create<mlir::scf::YieldOp>(loc, v);

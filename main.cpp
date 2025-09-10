@@ -29,16 +29,15 @@
 using namespace mlir;
 
 int main(int argc, char **argv) {
-  // std::string input = "let f x = let f1 y = y + 1 in f1 (x * 2)";
-  // std::string input = "let x = 1 in let y = 2 in x + y";
-  // std::string input = "let x = 1 in x + let y = 2 in y + 10";
-  // std::string input = "let f x = x + 10 in f 2";
-  // std::string input = "let f x y = x + y + 10 in f 2";
-  // std::string input = "let x = 1 in if x then x + 10 else 0";
-  // std::string input = "let a = 1 in let f x = x + 10 in f a";
-  // std::string input = "let a = 1 in let f x = x + a + 10 in f 2";
-  // std::string input = "let a = 1 in let f x y = x + y + 10 in let b = 2 in f a b";
-  std::string input = "let a = 1 in let f x = x + let b = 10 in b in f a";
+  // std::string input = "let create_multiplier_adder factor offset ="
+  // "let inner_function_x x ="
+  //   "let innermost_function_y y ="
+  //     "(x * factor) + (y + offset)"
+  //   "in"
+  //   "innermost_function_y"
+  // "in"
+  // "inner_function_x";
+  std::string input = "let x = 1 in x + let x = 2 in x";
   auto expr = sconeml::parse(input);
 
   
@@ -100,15 +99,3 @@ int main(int argc, char **argv) {
 
   return 0;
 }
-
-
-// consider
-// let create_multiplier_adder factor offset =
-//   let inner_function_x x =
-//     let innermost_function_y y =
-//       (x * factor) + (y + offset)
-//     in
-//     innermost_function_y
-//   in
-//   inner_function_x
-// ;;

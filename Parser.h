@@ -37,14 +37,14 @@ std::unique_ptr<ExprNode> parse(std::string& input) {
   tokenize(input, tokens);
   printf("===== tokens =====\n");
   for (auto& t : tokens) {
-    printf("%s\n", t.c_str());
+    printf("%s, ", t.c_str());
   }
+  printf("\n");
 
-  std::vector<std::unique_ptr<ExprNode>> stack;
-  std::vector<char> operators;
   std::unordered_set<std::string> fns;
-  auto reduceOpt = [&](int start) {
-    // printf("[reduceOpt] %d %lu %lu\n", start, operators.size(), stack.size());
+  auto reduceOpt = [&](std::vector<std::unique_ptr<ExprNode>>& stack, std::vector<char>& operators) {
+    // printf("[reduceOpt] %lu %lu\n", operators.size(), stack.size());
+    int start = 0;
     if (stack[start]->getKind() == ExprNode::Kind_Var && fns.contains(stack[start]->dump())) {
       auto fn = std::move(stack[start]);
       std::vector<std::unique_ptr<ExprNode>> args;
@@ -60,74 +60,78 @@ std::unique_ptr<ExprNode> parse(std::string& input) {
       auto right = std::move(stack[i+1]);
       left = std::make_unique<BinopExprNode>(operators[i], std::move(left), std::move(right));
     }
-    for (size_t i = start; i < operators.size(); i ++) {
+    size_t opSize = operators.size();
+    for (size_t i = start; i < opSize; i ++) {
       operators.pop_back();
       stack.pop_back();
     }
     stack.pop_back();
     stack.push_back(std::move(left));
+    // printf("  [reduceOpt] %d %lu %lu\n", start, operators.size(), stack.size());
   };
 
-  std::function<size_t(size_t)> parseExpr = [&](size_t start) {
-    size_t stackPos = stack.size();
+  std::function<std::unique_ptr<ExprNode>(size_t&)> parseExpr;
+
+  std::function<std::unique_ptr<ExprNode>(size_t&)> parseLet = [&](size_t& start) {
+    std::string var = tokens[start+1];
+    if (tokens[start+2] == "=") {
+      auto next = start + 3;
+      auto decl = parseExpr(next);
+      auto body = parseExpr(next);
+      auto let = std::make_unique<LetExprNode>(var, std::move(decl), std::move(body));
+      start = next;
+      return let;
+    }
+    std::vector<std::string> args;
+    size_t j = start + 2;
+    for (; j < tokens.size(); j ++) {
+      if (tokens[j] == "=") break;
+      args.push_back(tokens[j]);
+    }
+    auto next = j+1;
+    auto decl = parseExpr(next);
+    auto lambda = std::make_unique<LambdaExprNode>(var, args, std::move(decl));
+    fns.insert(var);
+
+    auto body = parseExpr(next);
+    auto let = std::make_unique<LetExprNode>(var, std::move(lambda), std::move(body));
+
+    // TODO fns pop lambda
+    start = next;
+    return let;
+  };
+
+  parseExpr = [&](size_t& start) {
+    std::vector<std::unique_ptr<ExprNode>> stack;
+    std::vector<char> operators;
+    // printf("**parseExpr** start %ld\n", start);
     size_t i = start;
     for (; i < tokens.size();) {
       auto& tok = tokens[i];
       // printf("[process tok] i: %lu tok: %s\n", i, tok.c_str());
       if (tok == ";" || tok == "in" || tok == "then" || tok == "else") {
-        reduceOpt(stackPos);
-        i++;
-        return i;
+        reduceOpt(stack, operators);
+        start = i+1;
+        auto top = std::move(stack[0]);
+        stack.pop_back();
+        return top;
       } else if (tok == "let") {
-        std::string var = tokens[i+1];
-        if (tokens[i+2] == "=") {
-          auto next = i + 3;
-          next = parseExpr(next);
-          auto decl = std::move(stack.back());
-          stack.pop_back();
-          next = parseExpr(next);
-          auto body = std::move(stack.back());
-          stack.pop_back();
-          auto let = std::make_unique<LetExprNode>(var, std::move(decl), std::move(body));
-          stack.push_back(std::move(let));
-          return next;
-        } else {
-          std::vector<std::string> args;
-          size_t j = i + 2;
-          for (; j < tokens.size(); j ++) {
-            if (tokens[j] == "=") break;
-            args.push_back(tokens[j]);
-          }
-          auto next = parseExpr(j+1);
-          auto decl = std::move(stack.back());
-          stack.pop_back();
-          auto lambda = std::make_unique<LambdaExprNode>(var, args, std::move(decl));
-          fns.insert(var);
-
-          next = parseExpr(next);
-          auto body = std::move(stack.back());
-          stack.pop_back();
-          auto let = std::make_unique<LetExprNode>(var, std::move(lambda), std::move(body));
-          stack.push_back(std::move(let));
-
-          // TODO fns pop lambda
-          return next;
-        }
+        auto let = parseLet(i);
+        stack.push_back(std::move(let));
+        reduceOpt(stack, operators);
+        auto top = std::move(stack[0]);
+        stack.pop_back();
+        start = i;
+        return top;
       } else if (tok == "if") {
         auto next = i + 1;
-        next = parseExpr(next);
-        auto cond = std::move(stack.back());
-        stack.pop_back();
-        next = parseExpr(next);
-        auto then = std::move(stack.back());
-        stack.pop_back();
-        next = parseExpr(next);
-        auto els = std::move(stack.back());
-        stack.pop_back();
+        auto cond = parseExpr(next);
+        auto then = parseExpr(next);
+        auto els = parseExpr(next);
 
         auto ifNode = std::make_unique<IfExprNode>(std::move(cond), std::move(then), std::move(els));
         stack.push_back(std::move(ifNode));
-        return next;
+        i = next;
       } else if (tok[0] >= '0' && tok[0] <= '9') {
         int v = std::stoi(tok);
         auto num = std::make_unique<NumberExprNode>(v);
@@ -143,17 +147,21 @@ std::unique_ptr<ExprNode> parse(std::string& input) {
       }
 
       if (i == tokens.size()) {
-        reduceOpt(stackPos);
+        reduceOpt(stack, operators);
       }
     }
-    return i;
+    auto top = std::move(stack[0]);
+    stack.pop_back();
+    start = tokens.size();
+    return top;
   };
 
-  parseExpr(0);
+  size_t start = 0;
+  std::unique_ptr<ExprNode> node = parseExpr(start);
   printf("===== ast =====\n");
-  printf("%s\n", stack.front()->dump().c_str());
+  printf("%s\n", node->dump().c_str());
   
-  return std::move(stack.front());
+  return node;
 }
 }
 

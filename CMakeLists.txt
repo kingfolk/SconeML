@@ -77,3 +77,41 @@ target_include_directories(mlir_example
   ${MLIR_INCLUDE_DIRS}
   ${LLVM_INCLUDE_DIRS}
 )
+
+add_llvm_executable(tester
+  test/tester.cpp
+  LetAlgDialect.cpp
+)
+
+target_compile_options(tester PRIVATE -fexceptions)
+
+add_dependencies(tester LetAlgDialectIncGen)
+
+get_property(dialect_libs GLOBAL PROPERTY MLIR_DIALECT_LIBS)
+get_property(conversion_libs GLOBAL PROPERTY MLIR_CONVERSION_LIBS)
+get_property(translation_libs GLOBAL PROPERTY MLIR_TRANSLATION_LIBS)
+get_property(extension_libs GLOBAL PROPERTY MLIR_EXTENSION_LIBS)
+
+target_link_libraries(tester
+  PRIVATE
+  ${dialect_libs}
+  ${extension_libs}
+  ${conversion_libs}
+  ${translation_libs}
+  MLIRDialect
+  MLIRIR
+  MLIRParser
+  MLIRSupport
+  MLIRTransforms
+  MLIRTransformUtils
+  MLIRAnalysis
+  MLIRExecutionEngine
+)
+
+target_include_directories(tester 
+  PRIVATE 
+  ${CMAKE_CURRENT_BINARY_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${MLIR_INCLUDE_DIRS}
+  ${LLVM_INCLUDE_DIRS}
+)
