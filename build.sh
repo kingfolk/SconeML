@@ -15,12 +15,11 @@ echo -e "${GREEN}Building MLIR Minimal Dialect...${NC}"
 # fi
 
 BUILD_DIR="build"
-if [ -d "$BUILD_DIR" ]; then
-    echo -e "${YELLOW}Cleanup...${NC}"
-    rm -rf "$BUILD_DIR"
+if [ ! -d "$BUILD_DIR" ]; then
+    echo -e "${YELLOW}Creating build directory...${NC}"
+    mkdir "$BUILD_DIR"
 fi
 
-mkdir "$BUILD_DIR"
 cd "$BUILD_DIR"
 
 echo -e "${GREEN}Config CMake...${NC}"
