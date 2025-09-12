@@ -4,6 +4,16 @@
 #include "parser/AstToLetAlg.h"
 #include "src/conversion/UnwrapLet.h"
 #include "src/conversion/ClosureConversion.h"
+#include "src/conversion/LowerToLLVM.h"
+
+#include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
+#include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
+#include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVM.h"
+#include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
+#include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
+// #include "mlir/Transforms/Passes.h"
+
+
 
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -37,7 +47,8 @@ int main(int argc, char **argv) {
   //   "innermost_function_y"
   // "in"
   // "inner_function_x";
-  std::string input = "let x = 1 in x + let x = 2 in x";
+  // std::string input = "let x = 1 in x + let x = 2 in x";
+  std::string input = "let f x = x + 10 in f 2";
   auto expr = sconeml::parse(input);
 
   
@@ -65,7 +76,7 @@ int main(int argc, char **argv) {
   builder.setInsertionPointToStart(module.getBody());
 
   // Create a function that uses our letalg operations
-  auto funcType = builder.getFunctionType({}, {});
+  auto funcType = builder.getFunctionType({}, {builder.getI32Type()});
   auto function = builder.create<func::FuncOp>(loc, "test_function", funcType);
   
   auto &entryBlock = *function.addEntryBlock();
@@ -83,13 +94,31 @@ int main(int argc, char **argv) {
   pm.addPass(sconeml::createUnwrapLetPass());
   pm.addPass(sconeml::createClosureConversionPass());
   if (mlir::failed(pm.run(module))) {
-    llvm::errs() << "Pass run failed\n";
+    llvm::errs() << "Opt Pass run failed\n";
     return 1;
   }
 
-  llvm::outs() << "After passes MLIR:\n";
+  llvm::outs() << "After opt passes:\n";
   module.print(llvm::outs());
   llvm::outs() << "\n";
+
+  mlir::PassManager pm2(&context);
+  pm2.addPass(sconeml::createLowerToLLVMPass());
+  pm2.addPass(mlir::createConvertSCFToCFPass());
+  pm2.addPass(mlir::createConvertControlFlowToLLVMPass());
+  pm2.addPass(mlir::createArithToLLVMConversionPass());
+  pm2.addPass(mlir::createConvertFuncToLLVMPass());
+  // pm2.addPass(mlir::createReconcileUnrealizedCastsPass());
+
+  if (mlir::failed(pm2.run(module))) {
+    llvm::errs() << "LLVM Pass run failed\n";
+    return 1;
+  }
+
+  llvm::outs() << "After LLVM passes:\n";
+  module.print(llvm::outs());
+  llvm::outs() << "\n";
+
 
   // Verify the module
   if (failed(verify(module))) {

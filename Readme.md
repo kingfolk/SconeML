@@ -12,6 +12,7 @@ compiler opts:
 - [x] Alpha transformation to solve name conflict
 - [x] Variable capture as formal parameter
 - [ ] Inline let/lambda to some extent
+- [ ] Lower dialect to llvm and native
 
 I would like to achieve these above features based on optimization passes or extending LetAlg dialect we already have. I would also like to finish a compact runtime data structure design
 
