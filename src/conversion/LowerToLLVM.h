@@ -6,8 +6,10 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/BuiltinDialect.h"
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Conversion/LLVMCommon/ConversionTarget.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 
 namespace sconeml {
 

@@ -4,11 +4,11 @@ project(MLIRSconemlProject)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(LLVM 20.1 REQUIRED)
+find_package(LLVM 22.1 REQUIRED)
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 set(MLIR_DIR "${LLVM_DIR}/../mlir")
 message(STATUS "Using MLIRConfig.cmake in: ${MLIR_DIR}")
-find_package(MLIR 20.1 REQUIRED)
+find_package(MLIR 22.1 REQUIRED)
 
 # Add cmake path
 list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")

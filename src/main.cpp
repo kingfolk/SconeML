@@ -104,7 +104,7 @@ int main(int argc, char **argv) {
 
   mlir::PassManager pm2(&context);
   pm2.addPass(sconeml::createLowerToLLVMPass());
-  pm2.addPass(mlir::createConvertSCFToCFPass());
+  pm2.addPass(mlir::createSCFToControlFlowPass());
   pm2.addPass(mlir::createConvertControlFlowToLLVMPass());
   pm2.addPass(mlir::createArithToLLVMConversionPass());
   pm2.addPass(mlir::createConvertFuncToLLVMPass());

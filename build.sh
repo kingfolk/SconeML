@@ -7,12 +7,23 @@ NC='\033[0m' # No Color
 
 echo -e "${GREEN}Building MLIR Minimal Dialect...${NC}"
 
-# We pass LLVM_DIR manually, so comment following check step
-# # Check path for llvm and mlir
-# if ! command -v llvm-config &> /dev/null; then
-#     echo -e "${RED}Error: llvm-config not found${NC}"
-#     exit 1
-# fi
+BREW_BIN="$(command -v brew || true)"
+if [ -z "$BREW_BIN" ] && [ -x /opt/homebrew/bin/brew ]; then
+    BREW_BIN=/opt/homebrew/bin/brew
+fi
+
+if [ -z "$BREW_BIN" ]; then
+    echo -e "${RED}Error: Homebrew is required (https://brew.sh)${NC}"
+    exit 1
+fi
+
+LLVM_PREFIX="$($BREW_BIN --prefix llvm)"
+CMAKE_BIN="$($BREW_BIN --prefix cmake)/bin/cmake"
+
+if [ ! -x "$CMAKE_BIN" ]; then
+    echo -e "${RED}Error: Homebrew CMake is required (brew install cmake)${NC}"
+    exit 1
+fi
 
 BUILD_DIR="build"
 if [ ! -d "$BUILD_DIR" ]; then
@@ -23,10 +34,14 @@ fi
 cd "$BUILD_DIR"
 
 echo -e "${GREEN}Config CMake...${NC}"
-cmake .. \
+"$CMAKE_BIN" .. \
     -DCMAKE_BUILD_TYPE=Debug \
-    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\
-    -DLLVM_DIR=/usr/lib/llvm-20/lib/cmake/llvm
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    -DCMAKE_C_COMPILER="$LLVM_PREFIX/bin/clang" \
+    -DCMAKE_CXX_COMPILER="$LLVM_PREFIX/bin/clang++" \
+    -DLLVM_DIR="$LLVM_PREFIX/lib/cmake/llvm" \
+    -DMLIR_DIR="$LLVM_PREFIX/lib/cmake/mlir" \
+    -DCMAKE_PREFIX_PATH="$($BREW_BIN --prefix zstd)"
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}CMake config failed${NC}"
@@ -34,7 +49,7 @@ if [ $? -ne 0 ]; then
 fi
 
 echo -e "${GREEN}Making...${NC}"
-make -j$(nproc)
+make -j"$(sysctl -n hw.ncpu)"
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Making failed${NC}"
