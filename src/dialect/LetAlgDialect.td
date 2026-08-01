@@ -110,7 +110,9 @@ def YieldOp : LetAlg_Op<"yield", [Pure,Terminator]> {
   }];
 
   let arguments = (ins AnyType: $expr);
-  let results = (outs AnyType: $res);
+  let results = (outs);
+
+  let assemblyFormat = "$expr attr-dict `:` type($expr)";
 }
 
 def ApplyOp : LetAlg_Op<"apply", [Pure]> {

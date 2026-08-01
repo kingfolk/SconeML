@@ -101,10 +101,7 @@ class YieldLowering : public mlir::OpConversionPattern<sconeml::letalg::YieldOp>
   mlir::LogicalResult matchAndRewrite(sconeml::letalg::YieldOp op, 
   sconeml::letalg::YieldOp::Adaptor adaptor, 
   mlir::ConversionPatternRewriter& rewriter) const override {
-    mlir::Location loc = op.getLoc();
-    rewriter.setInsertionPoint(op);
-    auto retOp = rewriter.create<mlir::func::ReturnOp>(loc, op.getExpr());
-    rewriter.replaceOp(op, retOp);
+    rewriter.replaceOpWithNewOp<mlir::func::ReturnOp>(op, adaptor.getExpr());
 
     return mlir::success();
   }

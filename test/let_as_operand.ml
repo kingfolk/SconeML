@@ -7,7 +7,7 @@ module {
     %c10_i32 = arith.constant 10 : i32
     %0 = arith.addi %c2_i32, %c10_i32 : i32
     %1 = arith.addi %c1_i32, %0 : i32
-    %2 = "letalg.yield"(%1) : (i32) -> i32
+    letalg.yield %1 : i32
   }
 }
 *)

@@ -13,6 +13,14 @@ struct UnwrapLetPass : public mlir::PassWrapper<UnwrapLetPass, mlir::OperationPa
     getOperation().walk([&](mlir::Operation* op) {
       if (auto letOp = mlir::dyn_cast_or_null<sconeml::letalg::LetOp>(op)) {
         auto& region = letOp.getRegion();
+        auto yieldOp = mlir::dyn_cast<sconeml::letalg::YieldOp>(
+          region.front().getTerminator());
+        if (!yieldOp) {
+          letOp.emitError("expected letalg.yield terminator");
+          signalPassFailure();
+          return;
+        }
+        auto yieldedValue = yieldOp.getExpr();
         std::vector<mlir::Operation*> ops;
         for (auto& innerOp : region.getOps()) {
           ops.push_back(&innerOp);
@@ -23,7 +31,7 @@ struct UnwrapLetPass : public mlir::PassWrapper<UnwrapLetPass, mlir::OperationPa
           innerOp->moveBefore(op);
         }
 
-        op->replaceAllUsesWith(ops.back());
+        letOp.getResult().replaceAllUsesWith(yieldedValue);
         op->erase();
       }
     });
