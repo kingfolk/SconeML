@@ -83,7 +83,7 @@ int main(int argc, char **argv) {
   builder.setInsertionPointToStart(&entryBlock);
 
   auto last = sconeml::translate(builder, expr.get());
-  builder.create<sconeml::letalg::YieldOp>(loc, last.getType(), last);
+  builder.create<sconeml::letalg::YieldOp>(loc, last);
 
   llvm::outs() << "LetAlg MLIR:\n";
   module.print(llvm::outs());

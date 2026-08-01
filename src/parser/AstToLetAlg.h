@@ -72,7 +72,7 @@ mlir::Value translateLet(mlir::OpBuilder& builder, LetExprNode* let, TranslateCo
   processLet(let);
   letOp.setDeclCnt(ctx.values.size());
   auto v = translateExpr(builder, finalBody, ctx);
-  builder.create<sconeml::letalg::YieldOp>(loc, v.getType(), v);
+  builder.create<sconeml::letalg::YieldOp>(loc, v);
   letOp.getResult().setType(v.getType());
 
   builder.setInsertionPointAfter(letOp);
@@ -98,7 +98,7 @@ mlir::Value translateLambda(mlir::OpBuilder& builder, LambdaExprNode* lambda, Tr
   ctx.region = &region;
   builder.setInsertionPointToStart(scopeBlock);
   auto v = translateExpr(builder, lambda->getBody(), ctx);
-  builder.create<sconeml::letalg::YieldOp>(loc, v.getType(), v);
+  builder.create<sconeml::letalg::YieldOp>(loc, v);
   lambdaOp.getResult().setType(
     mlir::FunctionType::get(builder.getContext(), blockArgTps, mlir::TypeRange({v.getType()}))
   );

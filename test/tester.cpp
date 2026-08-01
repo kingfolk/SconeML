@@ -159,7 +159,7 @@ int main(int argc, char **argv) {
 
     auto expr = sconeml::parse(input);
     auto last = sconeml::translate(builder, expr.get());
-    builder.create<sconeml::letalg::YieldOp>(loc, last.getType(), last);
+    builder.create<sconeml::letalg::YieldOp>(loc, last);
 
     // std::cout << "LetAlg MLIR:\n";
     // module.dump();
