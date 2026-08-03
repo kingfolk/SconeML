@@ -18,6 +18,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <regex>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -79,9 +80,9 @@ private:
       const std::string op = tokens[position++];
       mlir::Value rhs = parseMultiply();
       if (op == "+")
-        value = mlir::arith::AddFOp::create(builder, loc, value, rhs);
+        value = mlir::arith::AddIOp::create(builder, loc, value, rhs);
       else
-        value = mlir::arith::SubFOp::create(builder, loc, value, rhs);
+        value = mlir::arith::SubIOp::create(builder, loc, value, rhs);
     }
     return value;
   }
@@ -90,7 +91,8 @@ private:
     mlir::Value value = parsePrimary();
     while (position < tokens.size() && tokens[position] == "*") {
       ++position;
-      value = mlir::arith::MulFOp::create(builder, loc, value, parsePrimary());
+      mlir::Value rhs = parsePrimary();
+      value = mlir::arith::MulIOp::create(builder, loc, value, rhs);
     }
     return value;
   }
@@ -108,10 +110,10 @@ private:
     if (token == parameter)
       return parameterValue;
     char *end = nullptr;
-    const float number = std::strtof(token.c_str(), &end);
+    const long number = std::strtol(token.c_str(), &end, 10);
     if (end && *end == '\0')
       return mlir::arith::ConstantOp::create(
-          builder, loc, builder.getF32FloatAttr(number));
+          builder, loc, builder.getI32IntegerAttr(number));
     throw std::runtime_error("unknown tensor expression variable: " + token);
   }
 
@@ -123,20 +125,36 @@ private:
   size_t position = 0;
 };
 
-struct TensorFunctionSource {
+struct TensorLiteralSource {
   std::string name;
-  std::string parameter;
+  std::string variable;
+  std::vector<int32_t> elements;
   std::string expression;
 };
 
-TensorFunctionSource parseTensorFunction(const std::string &source) {
+TensorLiteralSource parseTensorLiteral(const std::string &source) {
   static const std::regex declaration(
-      R"(^\s*let\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*tensor\s*<\s*f32\s*>\s*\)\s*=\s*([\s\S]*?)\s*$)");
+      R"(^\s*let\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\[([^\]]*)\]\s*in\s*([\s\S]*?)\s*$)");
   std::smatch match;
   if (!std::regex_match(source, match, declaration))
     throw std::runtime_error(
-        "tensor programs must use: let name (x : tensor<f32>) = expression");
-  return {match[1].str(), match[2].str(), match[3].str()};
+        "tensor literals must use: let name = [1, 2, ...] in expression");
+
+  std::vector<int32_t> elements;
+  std::istringstream values(match[2].str());
+  std::string token;
+  while (std::getline(values, token, ',')) {
+    token.erase(0, token.find_first_not_of(" \t\n\r"));
+    token.erase(token.find_last_not_of(" \t\n\r") + 1);
+    char *end = nullptr;
+    const long value = std::strtol(token.c_str(), &end, 10);
+    if (token.empty() || !end || *end != '\0')
+      throw std::runtime_error("tensor literal elements must be i32 integers");
+    elements.push_back(static_cast<int32_t>(value));
+  }
+  if (elements.empty())
+    throw std::runtime_error("tensor literals must contain at least one element");
+  return {"tensor_literal", match[1].str(), std::move(elements), match[3].str()};
 }
 
 std::unique_ptr<mlir::MLIRContext> createTensorContext() {
@@ -156,38 +174,44 @@ std::unique_ptr<mlir::MLIRContext> createTensorContext() {
 } // namespace
 
 TensorModule translateTensorProgram(const std::string &source) {
-  const TensorFunctionSource program = parseTensorFunction(source);
+  const TensorLiteralSource program = parseTensorLiteral(source);
   auto context = createTensorContext();
-
   mlir::OpBuilder builder(context.get());
   mlir::Location loc = builder.getUnknownLoc();
   auto module = mlir::ModuleOp::create(builder, loc);
   builder.setInsertionPointToStart(module.getBody());
 
   auto bufferType = mlir::MemRefType::get(
-      {mlir::ShapedType::kDynamic}, builder.getF32Type());
-  auto functionType = builder.getFunctionType({bufferType, bufferType}, {});
-  auto function = mlir::func::FuncOp::create(
-      builder, loc, program.name, functionType);
-  function->setAttr("llvm.emit_c_interface", builder.getUnitAttr());
+      {static_cast<int64_t>(program.elements.size())}, builder.getI32Type());
+  auto functionType = builder.getFunctionType({}, {bufferType});
+  auto function = mlir::func::FuncOp::create(builder, loc, program.name, functionType);
   mlir::Block *entry = function.addEntryBlock();
   builder.setInsertionPointToStart(entry);
+  auto input = mlir::memref::AllocOp::create(builder, loc, bufferType);
+  auto output = mlir::memref::AllocOp::create(builder, loc, bufferType);
+  for (size_t i = 0; i < program.elements.size(); ++i) {
+    auto index = mlir::arith::ConstantIndexOp::create(builder, loc, i);
+    auto value = mlir::arith::ConstantOp::create(
+        builder, loc, builder.getI32IntegerAttr(program.elements[i]));
+    mlir::memref::StoreOp::create(builder, loc, value, input.getResult(),
+                                  mlir::ValueRange{index.getResult()});
+  }
 
   auto map = sconeml::letalg::TensorMapOp::create(
-      builder, loc, entry->getArgument(0), entry->getArgument(1));
+      builder, loc, input.getResult(), output.getResult());
   mlir::Block *body = builder.createBlock(
-      &map.getBody(), {}, {builder.getF32Type()}, {loc});
+      &map.getBody(), {}, {builder.getI32Type()}, {loc});
   builder.setInsertionPointToStart(body);
   mlir::Value result = ScalarExpressionParser(
-      builder, loc, program.parameter, body->getArgument(0), program.expression)
+      builder, loc, program.variable, body->getArgument(0), program.expression)
                            .parse();
   sconeml::letalg::YieldOp::create(builder, loc, result);
 
   builder.setInsertionPointToEnd(entry);
-  mlir::func::ReturnOp::create(builder, loc);
+  mlir::func::ReturnOp::create(builder, loc, mlir::ValueRange{output.getResult()});
 
   if (mlir::failed(mlir::verify(module)))
-    throw std::runtime_error("translated tensor LetAlg module failed verification");
+    throw std::runtime_error("translated tensor literal module failed verification");
   return {std::move(context), std::move(module)};
 }
 

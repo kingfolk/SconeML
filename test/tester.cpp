@@ -144,13 +144,18 @@ int main(int argc, char **argv) {
           input.substr(assertStart + std::string("@letalg:tensor").size(),
                        assertEnd - assertStart -
                            std::string("@letalg:tensor").size());
-      const std::string source = input.substr(assertEnd + 2);
-      const std::string actual = sconeml::tensor::translateTensorIR(source);
+      std::string source = input.substr(assertEnd + 2);
+      const auto actual = sconeml::translateTensorProgram(source);
+      if (!actual) {
+        llvm::errs() << "Tensor annotation requires a tensor literal program: "
+                     << filename << "\n";
+        return 1;
+      }
       std::istringstream expected(required);
       std::string fragment;
       while (std::getline(expected, fragment)) {
         fragment = trim(fragment);
-        if (!fragment.empty() && actual.find(fragment) == std::string::npos) {
+        if (!fragment.empty() && actual->find(fragment) == std::string::npos) {
           llvm::errs() << "Tensor IR assertion failed for " << filename
                        << ": missing " << fragment << "\n";
           return 1;

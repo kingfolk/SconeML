@@ -110,19 +110,19 @@ LogicalResult TensorMapOp::verify() {
   auto inputType = dyn_cast<MemRefType>(getInput().getType());
   auto outputType = dyn_cast<MemRefType>(getOutput().getType());
   if (!inputType || !outputType || inputType.getRank() != 1 ||
-      outputType.getRank() != 1 || !inputType.getElementType().isF32() ||
-      inputType != outputType)
+      outputType.getRank() != 1 || inputType != outputType)
     return emitOpError(
-        "expects matching rank-1 memref<?xf32> input and output buffers");
+        "expects matching rank-1 input and output memref buffers");
 
   if (getBody().empty() || !llvm::hasSingleElement(getBody()))
     return emitOpError("expects a single-block scalar body");
   Block &body = getBody().front();
-  if (body.getNumArguments() != 1 || !body.getArgument(0).getType().isF32())
-    return emitOpError("expects exactly one f32 scalar body argument");
+  if (body.getNumArguments() != 1 ||
+      body.getArgument(0).getType() != inputType.getElementType())
+    return emitOpError("expects one body argument matching the memref element type");
   auto yield = dyn_cast<YieldOp>(body.getTerminator());
-  if (!yield || !yield.getExpr().getType().isF32())
-    return emitOpError("body must terminate with letalg.yield of f32");
+  if (!yield || yield.getExpr().getType() != inputType.getElementType())
+    return emitOpError("body must yield the memref element type");
   return success();
 }
 

@@ -118,9 +118,6 @@ target_include_directories(tester
 )
 
 enable_testing()
-add_test(NAME tensor_ir COMMAND tester --file polynomial.ml)
+add_test(NAME tensor_ir COMMAND tester --file tensor_literal.ml)
 set_tests_properties(tensor_ir PROPERTIES
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME tensor_ir_polynomial2 COMMAND tester --file polynomial2.ml)
-set_tests_properties(tensor_ir_polynomial2 PROPERTIES
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

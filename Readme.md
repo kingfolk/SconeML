@@ -70,17 +70,16 @@ module {
 
 ### Elementwise tensors
 
-The tensor frontend accepts a typed, single-parameter function whose parameter
-is a rank-1 `tensor<f32>`. Its scalar body supports `+`, `-`, `*`, parentheses,
-and `f32` literals:
+The tensor frontend recognizes a bracket literal as a rank-1 integer tensor.
+Its elementwise body supports `+`, `-`, `*`, and parentheses:
 
 ```ocaml
-let polynomial (x : tensor<f32>) = x * x + 2.0 * x + 1.0
+let ts = [1, 2, 3] in ts * ts + 2 * ts + 1
 ```
 
-It translates the tensor parameter to input/output `memref<?xf32>` buffers and
-the scalar body to `letalg.tensor_map`. Tensor fixtures use `@letalg:tensor`
-to assert this generated LetAlg IR.
+It infers `ts` as `tensor<i32>`, materializes `memref<3xi32>` input/output
+buffers, and translates the scalar body to `letalg.tensor_map`. Tensor fixtures
+use `@letalg:tensor` to assert this generated LetAlg IR.
 
 - currying
 

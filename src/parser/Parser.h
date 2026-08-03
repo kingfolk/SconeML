@@ -2,13 +2,23 @@
 #define SCONEML_PARSER_H
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_set>
 #include <functional>
 #include <memory>
 #include "Ast.h"
+#include "src/tensor/TensorIR.h"
 
 namespace sconeml {
+
+// Tensor literals are unambiguous in the current language grammar. Keep this
+// dispatch in the parser layer so callers do not choose a translation path.
+std::optional<std::string> translateTensorProgram(std::string &input) {
+  if (input.find('[') == std::string::npos)
+    return std::nullopt;
+  return tensor::translateTensorIR(input);
+}
 
 void tokenize(std::string& input, std::vector<std::string>& tokens) {
   std::string tok;
