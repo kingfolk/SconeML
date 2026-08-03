@@ -80,6 +80,7 @@ target_include_directories(mlir_example
 
 add_llvm_executable(tester
   test/tester.cpp
+  src/tensor/TensorIR.cpp
   src/dialect/LetAlgDialect.cpp
 )
 
@@ -115,3 +116,8 @@ target_include_directories(tester
   ${MLIR_INCLUDE_DIRS}
   ${LLVM_INCLUDE_DIRS}
 )
+
+enable_testing()
+add_test(NAME tensor_ir COMMAND tester --file polynomial.ml)
+set_tests_properties(tensor_ir PROPERTIES
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

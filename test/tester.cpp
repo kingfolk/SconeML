@@ -2,11 +2,13 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include "src/dialect/LetAlgDialect.h"
 #include "src/parser/Parser.h"
 #include "src/parser/AstToLetAlg.h"
 #include "src/conversion/UnwrapLet.h"
 #include "src/conversion/ClosureConversion.h"
+#include "src/tensor/TensorIR.h"
 
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -120,8 +122,43 @@ int main(int argc, char **argv) {
     "let x = 1 in x + let y = 2 in y + 10"
   };
 
+  std::string selectedFile;
+  if (argc == 3 && std::string(argv[1]) == "--file") {
+    selectedFile = argv[2];
+  } else if (argc != 1) {
+    llvm::errs() << "usage: tester [--file <test.ml>]\n";
+    return 1;
+  }
+
   auto files = readFilesWithExtensions("test", {".ml"});
   for (auto file : files) {
+    auto filename = std::get<0>(file);
+    if (!selectedFile.empty() && filename != selectedFile)
+      continue;
+
+    auto input = std::get<1>(file);
+    if (input.find("@tensor:ir") != std::string::npos) {
+      const int assertStart = input.find("@tensor:ir");
+      const int assertEnd = input.find("*)");
+      const std::string required =
+          input.substr(assertStart + std::string("@tensor:ir").size(),
+                       assertEnd - assertStart -
+                           std::string("@tensor:ir").size());
+      const std::string actual = sconeml::tensor::buildPolynomialIR();
+      std::istringstream expected(required);
+      std::string fragment;
+      while (std::getline(expected, fragment)) {
+        fragment = trim(fragment);
+        if (!fragment.empty() && actual.find(fragment) == std::string::npos) {
+          llvm::errs() << "Tensor IR assertion failed for " << filename
+                       << ": missing " << fragment << "\n";
+          return 1;
+        }
+      }
+      std::cout << "Tensor IR test passed: " << filename << "\n";
+      continue;
+    }
+
     auto context = std::make_unique<MLIRContext>();
   
     // Load dialects including our letalg dialect
@@ -134,8 +171,6 @@ int main(int argc, char **argv) {
     OpBuilder builder(context.get());
     auto loc = builder.getUnknownLoc();
 
-    auto filename = std::get<0>(file);
-    auto input = std::get<1>(file);
     int assertStart = input.find("@");
     int assertEnd = input.find("*)");
     std::string assert = input.substr(assertStart, assertEnd-assertStart);
