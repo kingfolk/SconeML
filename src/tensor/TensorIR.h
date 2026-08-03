@@ -13,9 +13,9 @@ struct TensorModule {
   mlir::OwningOpRef<mlir::ModuleOp> module;
 };
 
-TensorModule buildPolynomialModule();
 std::string printModule(mlir::Operation *operation);
-std::string buildPolynomialIR();
+TensorModule translateTensorProgram(const std::string &source);
+std::string translateTensorIR(const std::string &source);
 
 } // namespace sconeml::tensor
 

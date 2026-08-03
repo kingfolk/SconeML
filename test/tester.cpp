@@ -144,7 +144,8 @@ int main(int argc, char **argv) {
           input.substr(assertStart + std::string("@letalg:tensor").size(),
                        assertEnd - assertStart -
                            std::string("@letalg:tensor").size());
-      const std::string actual = sconeml::tensor::buildPolynomialIR();
+      const std::string source = input.substr(assertEnd + 2);
+      const std::string actual = sconeml::tensor::translateTensorIR(source);
       std::istringstream expected(required);
       std::string fragment;
       while (std::getline(expected, fragment)) {
