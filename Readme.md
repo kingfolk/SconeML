@@ -48,6 +48,18 @@ The test evaluates `x*x + 2*x + 1` and asserts the native result against the
 expected tensor. Tensor literals in the source parser, multidimensional shapes,
 reductions, fusion, allocation, and device placement are follow-ups.
 
+On macOS, the GPU runner translates the same scalar region to Metal Shading
+Language, compiles it for the default Apple GPU, dispatches the kernel, and
+compares every result element against both the expected tensor and the CPU JIT:
+
+```text
+letalg.tensor_map -> Metal Shading Language -> native Apple GPU
+```
+
+Run the cross-target test on a Metal-capable machine with `./build/tensor_targets`.
+Other platforms keep the CPU test active and use a GPU runtime stub until a
+CUDA, ROCm, or SPIR-V backend is added.
+
 ## ML in MLIR dialect
 
 - ML's let sytle
