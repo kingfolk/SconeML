@@ -25,17 +25,16 @@ public:
     auto outputType = mlir::dyn_cast<mlir::MemRefType>(op.getOutput().getType());
     if (!inputType || !outputType || inputType.getRank() != 1 ||
         outputType.getRank() != 1 ||
-        !inputType.getElementType().isF32() ||
         inputType.getElementType() != outputType.getElementType())
       return rewriter.notifyMatchFailure(
-          op, "expected matching rank-1 memref<?xf32> operands");
+          op, "expected matching rank-1 memref operands");
 
     mlir::Block &mapBody = op.getBody().front();
     auto yield = mlir::dyn_cast<sconeml::letalg::YieldOp>(mapBody.getTerminator());
     if (!yield || mapBody.getNumArguments() != 1 ||
-        !mapBody.getArgument(0).getType().isF32())
+        mapBody.getArgument(0).getType() != inputType.getElementType())
       return rewriter.notifyMatchFailure(
-          op, "expected one f32 body argument and letalg.yield terminator");
+          op, "expected one element-typed body argument and yield terminator");
 
     mlir::Location loc = op.getLoc();
     mlir::Value zero =

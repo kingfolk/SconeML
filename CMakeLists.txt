@@ -122,7 +122,6 @@ target_include_directories(tester
 
 add_llvm_executable(tensor_targets
   test/tensor_cpu.cpp
-  src/tensor/TensorIR.cpp
   src/tensor/CPURunner.cpp
   src/dialect/LetAlgDialect.cpp
 )
