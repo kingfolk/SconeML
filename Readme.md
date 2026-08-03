@@ -18,6 +18,36 @@ I would like to achieve these above features based on optimization passes or ext
 
 - [ ] efficient stack frame
 
+## Tensor IR and CPU runner
+
+SconeML now has a local tensor IR for dynamic rank-1 `f32` buffers.
+`letalg.tensor_map` contains a scalar region evaluated for every input element
+and writes the result to the matching output element. The supported scalar
+operations are `arith.constant`, `arith.addf`, `arith.subf`, `arith.mulf`, and
+`arith.divf`.
+
+The CPU runner lowers the operation through SCF and memref to the LLVM dialect,
+then executes native machine code through MLIR's execution engine:
+
+```text
+letalg.tensor_map -> scf.for + memref -> LLVM dialect -> native CPU JIT
+```
+
+Run the CPU assertion with:
+
+```sh
+cmake -S . -B build \
+  -DLLVM_DIR="$(brew --prefix llvm)/lib/cmake/llvm" \
+  -DMLIR_DIR="$(brew --prefix llvm)/lib/cmake/mlir" \
+  -DCMAKE_CXX_COMPILER="$(brew --prefix llvm)/bin/clang++"
+cmake --build build --target tensor_targets -j4
+./build/tensor_targets
+```
+
+The test evaluates `x*x + 2*x + 1` and asserts the native result against the
+expected tensor. Tensor literals in the source parser, multidimensional shapes,
+reductions, fusion, allocation, and device placement are follow-ups.
+
 ## ML in MLIR dialect
 
 - ML's let sytle
