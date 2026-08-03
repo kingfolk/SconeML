@@ -137,13 +137,13 @@ int main(int argc, char **argv) {
       continue;
 
     auto input = std::get<1>(file);
-    if (input.find("@tensor:ir") != std::string::npos) {
-      const int assertStart = input.find("@tensor:ir");
+    if (input.find("@letalg:tensor") != std::string::npos) {
+      const int assertStart = input.find("@letalg:tensor");
       const int assertEnd = input.find("*)");
       const std::string required =
-          input.substr(assertStart + std::string("@tensor:ir").size(),
+          input.substr(assertStart + std::string("@letalg:tensor").size(),
                        assertEnd - assertStart -
-                           std::string("@tensor:ir").size());
+                           std::string("@letalg:tensor").size());
       const std::string actual = sconeml::tensor::buildPolynomialIR();
       std::istringstream expected(required);
       std::string fragment;

@@ -1,5 +1,5 @@
 (*
-@tensor:ir
+@letalg:tensor
 func.func @tensor_polynomial
 memref<?xf32>
 letalg.tensor_map
