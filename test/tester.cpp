@@ -8,7 +8,6 @@
 #include "src/parser/AstToLetAlg.h"
 #include "src/conversion/UnwrapLet.h"
 #include "src/conversion/ClosureConversion.h"
-#include "src/tensor/TensorIR.h"
 
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -137,40 +136,13 @@ int main(int argc, char **argv) {
       continue;
 
     auto input = std::get<1>(file);
-    if (input.find("@letalg:tensor") != std::string::npos) {
-      const int assertStart = input.find("@letalg:tensor");
-      const int assertEnd = input.find("*)");
-      const std::string required =
-          input.substr(assertStart + std::string("@letalg:tensor").size(),
-                       assertEnd - assertStart -
-                           std::string("@letalg:tensor").size());
-      std::string source = input.substr(assertEnd + 2);
-      const auto actual = sconeml::translateTensorProgram(source);
-      if (!actual) {
-        llvm::errs() << "Tensor annotation requires a tensor literal program: "
-                     << filename << "\n";
-        return 1;
-      }
-      std::istringstream expected(required);
-      std::string fragment;
-      while (std::getline(expected, fragment)) {
-        fragment = trim(fragment);
-        if (!fragment.empty() && actual->find(fragment) == std::string::npos) {
-          llvm::errs() << "Tensor IR assertion failed for " << filename
-                       << ": missing " << fragment << "\n";
-          return 1;
-        }
-      }
-      std::cout << "Tensor IR test passed: " << filename << "\n";
-      continue;
-    }
-
     auto context = std::make_unique<MLIRContext>();
   
     // Load dialects including our letalg dialect
     context->getOrLoadDialect<sconeml::letalg::LetAlgDialect>();
     context->getOrLoadDialect<func::FuncDialect>();
     context->getOrLoadDialect<arith::ArithDialect>();
+    context->getOrLoadDialect<memref::MemRefDialect>();
     context->getOrLoadDialect<scf::SCFDialect>();
 
     // Create a simple program using our dialect

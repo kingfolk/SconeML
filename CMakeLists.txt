@@ -80,7 +80,6 @@ target_include_directories(mlir_example
 
 add_llvm_executable(tester
   test/tester.cpp
-  src/tensor/TensorIR.cpp
   src/dialect/LetAlgDialect.cpp
 )
 

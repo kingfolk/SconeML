@@ -2,23 +2,13 @@
 #define SCONEML_PARSER_H
 
 #include <memory>
-#include <optional>
 #include <string>
 #include <unordered_set>
 #include <functional>
 #include <memory>
 #include "Ast.h"
-#include "src/tensor/TensorIR.h"
 
 namespace sconeml {
-
-// Tensor literals are unambiguous in the current language grammar. Keep this
-// dispatch in the parser layer so callers do not choose a translation path.
-std::optional<std::string> translateTensorProgram(std::string &input) {
-  if (input.find('[') == std::string::npos)
-    return std::nullopt;
-  return tensor::translateTensorIR(input);
-}
 
 void tokenize(std::string& input, std::vector<std::string>& tokens) {
   std::string tok;
@@ -26,7 +16,10 @@ void tokenize(std::string& input, std::vector<std::string>& tokens) {
     if (c == ' ' || c == '\n' || c == ';') {
       if (tok.size() > 0) tokens.push_back(tok);
       tok.resize(0);
-    } else if (c == '(' || c == ')' || c == '{' || c == '}' || c == '+' || c == '-' || c == '*' || c == '/' || c == '^' || c == '!' || c == '~' || c == '>' || c == '<') {
+    } else if (c == '(' || c == ')' || c == '{' || c == '}' || c == '[' ||
+               c == ']' || c == ',' || c == '+' || c == '-' || c == '*' ||
+               c == '/' || c == '^' || c == '!' || c == '~' || c == '>' ||
+               c == '<') {
       if (tok.size() > 0) tokens.push_back(tok);
       tokens.push_back(std::string{c});
       tok.resize(0);
@@ -65,10 +58,24 @@ std::unique_ptr<ExprNode> parse(std::string& input) {
       return;
     }
 
-    std::unique_ptr<ExprNode> left = std::move(stack[start]);
-    for (size_t i = start; i < operators.size(); i ++) {
-      auto right = std::move(stack[i+1]);
-      left = std::make_unique<BinopExprNode>(operators[i], std::move(left), std::move(right));
+    std::vector<std::unique_ptr<ExprNode>> terms;
+    std::vector<char> additiveOperators;
+    terms.push_back(std::move(stack[start]));
+    for (size_t i = start; i < operators.size(); ++i) {
+      auto right = std::move(stack[i + 1]);
+      if (operators[i] == '*') {
+        auto left = std::move(terms.back());
+        terms.back() = std::make_unique<BinopExprNode>(
+            '*', std::move(left), std::move(right));
+      } else {
+        additiveOperators.push_back(operators[i]);
+        terms.push_back(std::move(right));
+      }
+    }
+    std::unique_ptr<ExprNode> left = std::move(terms[0]);
+    for (size_t i = 0; i < additiveOperators.size(); ++i) {
+      left = std::make_unique<BinopExprNode>(
+          additiveOperators[i], std::move(left), std::move(terms[i + 1]));
     }
     size_t opSize = operators.size();
     for (size_t i = start; i < opSize; i ++) {
@@ -142,12 +149,30 @@ std::unique_ptr<ExprNode> parse(std::string& input) {
         auto ifNode = std::make_unique<IfExprNode>(std::move(cond), std::move(then), std::move(els));
         stack.push_back(std::move(ifNode));
         i = next;
+      } else if (tok == "[") {
+        std::vector<int> values;
+        ++i;
+        while (i < tokens.size() && tokens[i] != "]") {
+          if (tokens[i] == ",") {
+            ++i;
+            continue;
+          }
+          if (tokens[i].empty() || tokens[i][0] < '0' || tokens[i][0] > '9')
+            throw std::invalid_argument("tensor literal elements must be integers");
+          values.push_back(std::stoi(tokens[i++]));
+        }
+        if (i == tokens.size())
+          throw std::invalid_argument("unterminated tensor literal");
+        if (values.empty())
+          throw std::invalid_argument("tensor literal cannot be empty");
+        stack.push_back(std::make_unique<TensorLiteralExprNode>(std::move(values)));
+        ++i;
       } else if (tok[0] >= '0' && tok[0] <= '9') {
         int v = std::stoi(tok);
         auto num = std::make_unique<NumberExprNode>(v);
         stack.push_back(std::move(num));
         i++;
-      } else if (tok[0] == '+' || tok[0] == '-') {
+      } else if (tok[0] == '+' || tok[0] == '-' || tok[0] == '*') {
         operators.push_back(tok[0]);
         i++;
       } else {
