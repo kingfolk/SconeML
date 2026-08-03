@@ -156,4 +156,7 @@ enable_testing()
 add_test(NAME tensor_ir COMMAND tester --file tensor_literal.ml)
 set_tests_properties(tensor_ir PROPERTIES
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME runner_cpu COMMAND tester --file let.ml)
+set_tests_properties(runner_cpu PROPERTIES
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tensor_cpu COMMAND tensor_targets)
