@@ -9,7 +9,7 @@ module {
   }
 }
 *)
-(*)
+(*
 @runner:cpu
 3
 *)
