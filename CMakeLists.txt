@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 project(MLIRSconemlProject)
 
+if(APPLE)
+  enable_language(OBJCXX)
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -116,7 +120,40 @@ target_include_directories(tester
   ${LLVM_INCLUDE_DIRS}
 )
 
+add_llvm_executable(tensor_targets
+  test/tensor_cpu.cpp
+  src/tensor/TensorIR.cpp
+  src/tensor/CPURunner.cpp
+  src/dialect/LetAlgDialect.cpp
+)
+
+target_compile_options(tensor_targets PRIVATE -fexceptions)
+add_dependencies(tensor_targets LetAlgDialectIncGen)
+
+target_link_libraries(tensor_targets
+  PRIVATE
+  ${dialect_libs}
+  ${extension_libs}
+  ${conversion_libs}
+  ${translation_libs}
+  MLIRDialect
+  MLIRIR
+  MLIRSupport
+  MLIRTransforms
+  MLIRTransformUtils
+  MLIRExecutionEngine
+)
+
+target_include_directories(tensor_targets
+  PRIVATE
+  ${CMAKE_CURRENT_BINARY_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${MLIR_INCLUDE_DIRS}
+  ${LLVM_INCLUDE_DIRS}
+)
+
 enable_testing()
 add_test(NAME tensor_ir COMMAND tester --file tensor_literal.ml)
 set_tests_properties(tensor_ir PROPERTIES
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tensor_cpu COMMAND tensor_targets)
