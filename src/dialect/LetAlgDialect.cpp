@@ -7,6 +7,7 @@
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/TypeUtilities.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/ADT/STLExtras.h"
 
 using namespace mlir;
 using namespace sconeml::letalg;
@@ -99,6 +100,30 @@ void ConstantOp::build(mlir::OpBuilder &builder, mlir::OperationState &state,
   auto dataType = builder.getF64Type();
   auto dataAttribute = builder.getF64FloatAttr(value);
   build(builder, state, dataType, dataAttribute);
+}
+
+//===----------------------------------------------------------------------===//
+// TensorMapOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult TensorMapOp::verify() {
+  auto inputType = dyn_cast<MemRefType>(getInput().getType());
+  auto outputType = dyn_cast<MemRefType>(getOutput().getType());
+  if (!inputType || !outputType || inputType.getRank() != 1 ||
+      outputType.getRank() != 1 || !inputType.getElementType().isF32() ||
+      inputType != outputType)
+    return emitOpError(
+        "expects matching rank-1 memref<?xf32> input and output buffers");
+
+  if (getBody().empty() || !llvm::hasSingleElement(getBody()))
+    return emitOpError("expects a single-block scalar body");
+  Block &body = getBody().front();
+  if (body.getNumArguments() != 1 || !body.getArgument(0).getType().isF32())
+    return emitOpError("expects exactly one f32 scalar body argument");
+  auto yield = dyn_cast<YieldOp>(body.getTerminator());
+  if (!yield || !yield.getExpr().getType().isF32())
+    return emitOpError("body must terminate with letalg.yield of f32");
+  return success();
 }
 
 //===----------------------------------------------------------------------===//

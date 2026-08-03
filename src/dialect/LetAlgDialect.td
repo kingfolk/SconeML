@@ -125,6 +125,24 @@ def ApplyOp : LetAlg_Op<"apply", [Pure]> {
   let results = (outs AnyType: $res);
 }
 
+// Apply a pure scalar region to every element of a rank-1 tensor buffer.
+// The input and output are kept as operands so the same operation can lower to
+// an SCF loop for the CPU or to a device kernel for a GPU backend.
+def TensorMapOp : LetAlg_Op<"tensor_map"> {
+  let summary = "elementwise map over a rank-1 tensor";
+  let description = [{
+    `tensor_map` invokes its single-block body once for every input element.
+    The body takes one scalar block argument and must terminate with
+    `letalg.yield` of the mapped scalar. The result is written to the output
+    buffer at the same index.
+  }];
+
+  let arguments = (ins AnyMemRef:$input, AnyMemRef:$output);
+  let results = (outs);
+  let regions = (region SizedRegion<1>:$body);
+  let hasVerifier = 1;
+}
+
 //===----------------------------------------------------------------------===//
 // LetAlg Types
 // //===----------------------------------------------------------------------===//
