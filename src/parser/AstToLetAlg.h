@@ -5,6 +5,7 @@
 #include "src/dialect/LetAlgDialect.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 
 #include <string>
@@ -46,6 +47,78 @@ struct TranslateContext {
 
 mlir::Value translateExpr(mlir::OpBuilder& builder, ExprNode* expr, TranslateContext& ctx);
 
+mlir::Value translateTensorLiteral(mlir::OpBuilder &builder,
+                                   TensorLiteralExprNode *literal) {
+  auto loc = builder.getUnknownLoc();
+  auto type = mlir::MemRefType::get(
+      {static_cast<int64_t>(literal->getValues().size())},
+      builder.getI32Type());
+  auto buffer = mlir::memref::AllocOp::create(builder, loc, type);
+  for (size_t i = 0; i < literal->getValues().size(); ++i) {
+    auto index = mlir::arith::ConstantIndexOp::create(builder, loc, i);
+    auto value = mlir::arith::ConstantOp::create(
+        builder, loc, builder.getI32IntegerAttr(literal->getValues()[i]));
+    mlir::memref::StoreOp::create(builder, loc, value, buffer.getResult(),
+                                  mlir::ValueRange{index.getResult()});
+  }
+  return buffer.getResult();
+}
+
+mlir::Value translateTensorElementExpr(mlir::OpBuilder &builder, ExprNode *expr,
+                                       const std::string &tensorName,
+                                       mlir::Value element,
+                                       TranslateContext &ctx) {
+  auto loc = builder.getUnknownLoc();
+  if (expr->getKind() == ExprNode::Kind_Var) {
+    auto *variable = static_cast<VarExprNode *>(expr);
+    if (variable->getName() == tensorName)
+      return element;
+    auto value = ctx.find(variable->getName());
+    if (!value || mlir::isa<mlir::ShapedType>(value.getType()))
+      throw std::invalid_argument("unsupported tensor expression variable " +
+                                  variable->getName());
+    return value;
+  }
+  if (expr->getKind() == ExprNode::Kind_Num) {
+    auto *number = static_cast<NumberExprNode *>(expr);
+    return mlir::arith::ConstantOp::create(
+        builder, loc, builder.getI32IntegerAttr(number->getValue()));
+  }
+  if (expr->getKind() == ExprNode::Kind_BinOp) {
+    auto *binary = static_cast<BinopExprNode *>(expr);
+    auto left = translateTensorElementExpr(builder, binary->getL(), tensorName,
+                                           element, ctx);
+    auto right = translateTensorElementExpr(builder, binary->getR(), tensorName,
+                                            element, ctx);
+    if (binary->getOp() == '*')
+      return mlir::arith::MulIOp::create(builder, loc, left, right);
+    if (binary->getOp() == '-')
+      return mlir::arith::SubIOp::create(builder, loc, left, right);
+    return mlir::arith::AddIOp::create(builder, loc, left, right);
+  }
+  throw std::invalid_argument("unsupported tensor expression " + expr->dump());
+}
+
+mlir::Value translateTensorMap(mlir::OpBuilder &builder, ExprNode *expr,
+                               const std::string &tensorName, mlir::Value input,
+                               TranslateContext &ctx) {
+  auto loc = builder.getUnknownLoc();
+  auto inputType = mlir::dyn_cast<mlir::MemRefType>(input.getType());
+  if (!inputType || inputType.getRank() != 1)
+    throw std::invalid_argument("tensor map input must be a rank-1 memref");
+  auto output = mlir::memref::AllocOp::create(builder, loc, inputType);
+  auto map = sconeml::letalg::TensorMapOp::create(
+      builder, loc, input, output.getResult());
+  auto *body = builder.createBlock(&map.getBody(), {},
+                                   {inputType.getElementType()}, {loc});
+  builder.setInsertionPointToStart(body);
+  auto result = translateTensorElementExpr(
+      builder, expr, tensorName, body->getArgument(0), ctx);
+  sconeml::letalg::YieldOp::create(builder, loc, result);
+  builder.setInsertionPointAfter(map);
+  return output.getResult();
+}
+
 mlir::Value translateLet(mlir::OpBuilder& builder, LetExprNode* let, TranslateContext& parent) {
   auto loc = builder.getUnknownLoc();
   TranslateContext ctx;
@@ -57,6 +130,18 @@ mlir::Value translateLet(mlir::OpBuilder& builder, LetExprNode* let, TranslateCo
   ctx.region = &region;
 
   builder.setInsertionPointToStart(scopeBlock);
+  if (let->getDecl()->getKind() == ExprNode::Kind_TensorLiteral) {
+    auto input = translateExpr(builder, let->getDecl(), ctx);
+    ctx.push(let->getVar(), input);
+    auto output = translateTensorMap(builder, let->getBody(), let->getVar(),
+                                     input, ctx);
+    letOp.setDeclCnt(1);
+    builder.create<sconeml::letalg::YieldOp>(loc, output);
+    letOp.getResult().setType(output.getType());
+    builder.setInsertionPointAfter(letOp);
+    return letOp;
+  }
+
   std::function<void(LetExprNode*)> processLet = [&](LetExprNode* letNode) {
     auto name = letNode->getVar();
     auto arg = translateExpr(builder, letNode->getDecl(), ctx);
@@ -165,12 +250,18 @@ mlir::Value translateExpr(mlir::OpBuilder& builder, ExprNode* expr, TranslateCon
     auto num = reinterpret_cast<NumberExprNode*>(expr);
     mlir::IntegerAttr i32Attr = builder.getIntegerAttr(builder.getI32Type(), num->getValue());
     return builder.create<mlir::arith::ConstantOp>(loc, i32Attr);
+  } else if (kind == ExprNode::Kind_TensorLiteral) {
+    return translateTensorLiteral(
+        builder, static_cast<TensorLiteralExprNode *>(expr));
   } else if (kind == ExprNode::Kind_BinOp) {
     auto binop = reinterpret_cast<BinopExprNode*>(expr);
     auto l = translateExpr(builder, binop->getL(), ctx);
     auto r = translateExpr(builder, binop->getR(), ctx);
     if (binop->getOp() == '-') {
       return builder.create<mlir::arith::SubIOp>(loc, l, r);
+    }
+    if (binop->getOp() == '*') {
+      return builder.create<mlir::arith::MulIOp>(loc, l, r);
     }
     return builder.create<mlir::arith::AddIOp>(loc, l, r);
   } else {

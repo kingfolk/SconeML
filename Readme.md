@@ -68,6 +68,19 @@ module {
 
 `lambda` is a callable op and `apply` is a call op.
 
+### Elementwise tensors
+
+The tensor frontend recognizes a bracket literal as a rank-1 integer tensor.
+Its elementwise body supports `+`, `-`, `*`, and parentheses:
+
+```ocaml
+let ts = [1, 2, 3] in ts * ts + 2 * ts + 1
+```
+
+It infers `ts` as `tensor<i32>`, materializes `memref<3xi32>` input/output
+buffers, and translates the scalar body to `letalg.tensor_map`. Tensor fixtures
+use `@letalg:tensor` to assert this generated LetAlg IR.
+
 - currying
 
 ```ocaml

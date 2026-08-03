@@ -11,6 +11,7 @@ class ExprNode {
 public:
   enum ExprNodeKind {
     Kind_Num,
+    Kind_TensorLiteral,
     Kind_Var,
     Kind_BinOp,
     Kind_Let,
@@ -30,6 +31,25 @@ public:
 
 private:
   const ExprNodeKind kind;
+};
+
+class TensorLiteralExprNode : public ExprNode {
+  std::vector<int> values;
+
+public:
+  explicit TensorLiteralExprNode(std::vector<int> values)
+      : ExprNode(Kind_TensorLiteral), values(std::move(values)) {}
+
+  const std::vector<int> &getValues() const { return values; }
+  std::string dump() override {
+    std::string result = "[";
+    for (size_t i = 0; i < values.size(); ++i) {
+      if (i != 0)
+        result += ", ";
+      result += std::to_string(values[i]);
+    }
+    return result + "]";
+  }
 };
 
 class NumberExprNode : public ExprNode {

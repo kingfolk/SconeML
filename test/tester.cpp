@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include "src/dialect/LetAlgDialect.h"
 #include "src/parser/Parser.h"
 #include "src/parser/AstToLetAlg.h"
@@ -120,22 +121,34 @@ int main(int argc, char **argv) {
     "let x = 1 in x + let y = 2 in y + 10"
   };
 
+  std::string selectedFile;
+  if (argc == 3 && std::string(argv[1]) == "--file") {
+    selectedFile = argv[2];
+  } else if (argc != 1) {
+    llvm::errs() << "usage: tester [--file <test.ml>]\n";
+    return 1;
+  }
+
   auto files = readFilesWithExtensions("test", {".ml"});
   for (auto file : files) {
+    auto filename = std::get<0>(file);
+    if (!selectedFile.empty() && filename != selectedFile)
+      continue;
+
+    auto input = std::get<1>(file);
     auto context = std::make_unique<MLIRContext>();
   
     // Load dialects including our letalg dialect
     context->getOrLoadDialect<sconeml::letalg::LetAlgDialect>();
     context->getOrLoadDialect<func::FuncDialect>();
     context->getOrLoadDialect<arith::ArithDialect>();
+    context->getOrLoadDialect<memref::MemRefDialect>();
     context->getOrLoadDialect<scf::SCFDialect>();
 
     // Create a simple program using our dialect
     OpBuilder builder(context.get());
     auto loc = builder.getUnknownLoc();
 
-    auto filename = std::get<0>(file);
-    auto input = std::get<1>(file);
     int assertStart = input.find("@");
     int assertEnd = input.find("*)");
     std::string assert = input.substr(assertStart, assertEnd-assertStart);

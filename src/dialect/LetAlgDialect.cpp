@@ -7,6 +7,7 @@
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/TypeUtilities.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/ADT/STLExtras.h"
 
 using namespace mlir;
 using namespace sconeml::letalg;
@@ -99,6 +100,30 @@ void ConstantOp::build(mlir::OpBuilder &builder, mlir::OperationState &state,
   auto dataType = builder.getF64Type();
   auto dataAttribute = builder.getF64FloatAttr(value);
   build(builder, state, dataType, dataAttribute);
+}
+
+//===----------------------------------------------------------------------===//
+// TensorMapOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult TensorMapOp::verify() {
+  auto inputType = dyn_cast<MemRefType>(getInput().getType());
+  auto outputType = dyn_cast<MemRefType>(getOutput().getType());
+  if (!inputType || !outputType || inputType.getRank() != 1 ||
+      outputType.getRank() != 1 || inputType != outputType)
+    return emitOpError(
+        "expects matching rank-1 input and output memref buffers");
+
+  if (getBody().empty() || !llvm::hasSingleElement(getBody()))
+    return emitOpError("expects a single-block scalar body");
+  Block &body = getBody().front();
+  if (body.getNumArguments() != 1 ||
+      body.getArgument(0).getType() != inputType.getElementType())
+    return emitOpError("expects one body argument matching the memref element type");
+  auto yield = dyn_cast<YieldOp>(body.getTerminator());
+  if (!yield || yield.getExpr().getType() != inputType.getElementType())
+    return emitOpError("body must yield the memref element type");
+  return success();
 }
 
 //===----------------------------------------------------------------------===//

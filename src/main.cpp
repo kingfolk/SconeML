@@ -66,6 +66,7 @@ int main(int argc, char **argv) {
   context.getOrLoadDialect<sconeml::letalg::LetAlgDialect>();
   context.getOrLoadDialect<func::FuncDialect>();
   context.getOrLoadDialect<arith::ArithDialect>();
+  context.getOrLoadDialect<memref::MemRefDialect>();
   context.getOrLoadDialect<scf::SCFDialect>();
 
   // Create a simple program using our dialect
