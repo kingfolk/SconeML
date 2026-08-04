@@ -17,4 +17,8 @@ module {
   }
 }
 *)
+(*
+@runner:cpu
+0
+*)
 let x = 1 in if x then x + 10 else 0
