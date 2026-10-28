@@ -13,4 +13,8 @@ module {
   }
 }
 *)
+(*
+@runner:cpu
+12
+*)
 let f x = x + 10 in f 2

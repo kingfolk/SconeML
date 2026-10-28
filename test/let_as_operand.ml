@@ -11,4 +11,8 @@ module {
   }
 }
 *)
+(*
+@runner:cpu
+13
+*)
 let x = 1 in x + let y = 2 in y + 10

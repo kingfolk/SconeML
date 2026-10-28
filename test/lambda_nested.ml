@@ -13,4 +13,8 @@ module {
   }
 }
 *)
+(*
+@runner:cpu
+11
+*)
 let a = 1 in let f x = x + let b = 10 in b in f a

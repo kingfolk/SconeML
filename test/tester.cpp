@@ -8,17 +8,25 @@
 #include "src/parser/AstToLetAlg.h"
 #include "src/conversion/UnwrapLet.h"
 #include "src/conversion/ClosureConversion.h"
+#include "src/conversion/LowerToLLVM.h"
 
+#include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
+#include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
+#include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
+#include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
+#include "mlir/ExecutionEngine/ExecutionEngine.h"
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Verifier.h"
+#include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/InitAllDialects.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/FileUtilities.h"
-#include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Dialect/All.h"
 #include "mlir/Target/LLVMIR/Export.h"
 
 #include "llvm/ADT/StringRef.h"
@@ -29,6 +37,9 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include <cstdint>
+#include <optional>
 
 using namespace mlir;
 namespace fs = std::filesystem;
@@ -107,6 +118,55 @@ std::string trim(const std::string& str) {
   return str.substr(start, end - start + 1);
 }
 
+std::optional<std::string> annotationValue(const std::string &input,
+                                           const std::string &marker) {
+  const size_t markerStart = input.find(marker);
+  if (markerStart == std::string::npos)
+    return std::nullopt;
+  const size_t annotationEnd = input.find("*)", markerStart);
+  if (annotationEnd == std::string::npos)
+    throw std::runtime_error("Unterminated annotation: " + marker);
+  return trim(input.substr(markerStart + marker.size(),
+                           annotationEnd - markerStart - marker.size()));
+}
+
+std::string sourceAfterAnnotations(const std::string &input) {
+  size_t position = 0;
+  while (true) {
+    position = input.find_first_not_of(" \t\n\r", position);
+    if (position == std::string::npos || input.compare(position, 2, "(*") != 0)
+      return input.substr(position == std::string::npos ? input.size() : position);
+    const size_t annotationEnd = input.find("*)", position + 2);
+    if (annotationEnd == std::string::npos)
+      throw std::runtime_error("Unterminated leading annotation block");
+    position = annotationEnd + 2;
+  }
+}
+
+int32_t runCPU(mlir::ModuleOp module) {
+  mlir::PassManager lower(module.getContext());
+  lower.addPass(sconeml::createLowerToLLVMPass());
+  lower.addPass(mlir::createSCFToControlFlowPass());
+  lower.addPass(mlir::createConvertControlFlowToLLVMPass());
+  lower.addPass(mlir::createArithToLLVMConversionPass());
+  lower.addPass(mlir::createConvertFuncToLLVMPass());
+  if (mlir::failed(lower.run(module)))
+    throw std::runtime_error("CPU lowering to LLVM failed");
+  if (mlir::failed(mlir::verify(module)))
+    throw std::runtime_error("lowered CPU module failed verification");
+
+  auto maybeEngine = mlir::ExecutionEngine::create(module.getOperation());
+  if (!maybeEngine)
+    throw std::runtime_error("could not create CPU JIT: " +
+                             llvm::toString(maybeEngine.takeError()));
+  auto maybeFunction = (*maybeEngine)->lookup("test_function");
+  if (!maybeFunction)
+    throw std::runtime_error("CPU JIT lookup failed: " +
+                             llvm::toString(maybeFunction.takeError()));
+  using TestFunction = int32_t (*)();
+  return reinterpret_cast<TestFunction>(*maybeFunction)();
+}
+
 int main(int argc, char **argv) {
   // Register any command line options.
   registerAsmPrinterCLOptions();
@@ -136,25 +196,31 @@ int main(int argc, char **argv) {
       continue;
 
     auto input = std::get<1>(file);
-    auto context = std::make_unique<MLIRContext>();
+    const auto letalgExpected = annotationValue(input, "@letalg:opt");
+    const auto cpuExpected = annotationValue(input, "@runner:cpu");
+    if (!letalgExpected && !cpuExpected) {
+      llvm::errs() << "No supported annotation found in " << filename << "\n";
+      return 1;
+    }
+
+    mlir::DialectRegistry registry;
+    mlir::registerAllToLLVMIRTranslations(registry);
+    auto context = std::make_unique<MLIRContext>(registry);
   
     // Load dialects including our letalg dialect
     context->getOrLoadDialect<sconeml::letalg::LetAlgDialect>();
     context->getOrLoadDialect<func::FuncDialect>();
     context->getOrLoadDialect<arith::ArithDialect>();
     context->getOrLoadDialect<memref::MemRefDialect>();
+    context->getOrLoadDialect<cf::ControlFlowDialect>();
+    context->getOrLoadDialect<LLVM::LLVMDialect>();
     context->getOrLoadDialect<scf::SCFDialect>();
 
     // Create a simple program using our dialect
     OpBuilder builder(context.get());
     auto loc = builder.getUnknownLoc();
 
-    int assertStart = input.find("@");
-    int assertEnd = input.find("*)");
-    std::string assert = input.substr(assertStart, assertEnd-assertStart);
-    int expectedStart = assert.find("\n");
-    std::string expected = trim(assert.substr(expectedStart+1, assert.size()));
-    input = input.substr(assertEnd+2, input.size());
+    input = sourceAfterAnnotations(input);
 
     std::cout << std::endl;
     std::cout << "<<<< test run for file: " << filename << ">>>>" << std::endl;
@@ -191,15 +257,31 @@ int main(int argc, char **argv) {
     module.print(os);
     // std::cout << "After passes MLIR:\n";
     // std::cout << trim(output);
-    if (trim(output) != expected) {
-      llvm::errs() << "Assert failed for " << filename << ". Expected:\n" << expected << "\n But actual:\n" << trim(output);
-      return 1;
+    if (letalgExpected) {
+      if (trim(output) != *letalgExpected) {
+        llvm::errs() << "LetAlg assertion failed for " << filename
+                     << ". Expected:\n" << *letalgExpected
+                     << "\nBut actual:\n" << trim(output);
+        return 1;
+      }
     }
 
     // Verify the module
     if (failed(verify(module))) {
       llvm::errs() << "Module verification failed\n";
       return 1;
+    }
+
+    if (cpuExpected) {
+      const int32_t expected = std::stoi(*cpuExpected);
+      function.setType(builder.getFunctionType({}, {builder.getI32Type()}));
+      const int32_t actual = runCPU(module);
+      if (actual != expected) {
+        llvm::errs() << "CPU runner assertion failed for " << filename
+                     << ": expected " << expected << ", got " << actual << "\n";
+        return 1;
+      }
+      std::cout << "CPU runner test passed: " << filename << "\n";
     }
 
     module.erase();
