@@ -120,9 +120,18 @@ target_include_directories(tester
   ${LLVM_INCLUDE_DIRS}
 )
 
+if(APPLE)
+  set(SCONEML_GPU_RUNTIME src/tensor/MetalRuntime.mm)
+  set_source_files_properties(src/tensor/MetalRuntime.mm
+    PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+else()
+  set(SCONEML_GPU_RUNTIME src/tensor/MetalRuntimeStub.cpp)
+endif()
 add_llvm_executable(tensor_targets
-  test/tensor_cpu.cpp
+  test/tensor_targets.cpp
   src/tensor/CPURunner.cpp
+  src/tensor/GPURunner.cpp
+  ${SCONEML_GPU_RUNTIME}
   src/dialect/LetAlgDialect.cpp
 )
 
@@ -143,6 +152,10 @@ target_link_libraries(tensor_targets
   MLIRExecutionEngine
 )
 
+if(APPLE)
+  target_link_libraries(tensor_targets PRIVATE "-framework Foundation" "-framework Metal")
+endif()
+
 target_include_directories(tensor_targets
   PRIVATE
   ${CMAKE_CURRENT_BINARY_DIR}
@@ -158,4 +171,8 @@ set_tests_properties(tensor_ir PROPERTIES
 add_test(NAME runner_cpu COMMAND tester --file let.ml)
 set_tests_properties(runner_cpu PROPERTIES
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME tensor_cpu COMMAND tensor_targets)
+add_test(NAME tensor_cpu COMMAND tensor_targets --cpu-only)
+if(APPLE)
+  add_test(NAME tensor_cross_target COMMAND tensor_targets)
+  set_tests_properties(tensor_cross_target PROPERTIES SKIP_RETURN_CODE 77)
+endif()
