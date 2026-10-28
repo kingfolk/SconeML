@@ -3,11 +3,12 @@
 
 #include <string>
 #include <vector>
+#include <cstdint>
 
 namespace sconeml::tensor {
 
-std::vector<float> runPolynomialGPU(const std::vector<float> &input,
-                                    std::string *gpuSource = nullptr);
+std::vector<int32_t> runTensorLiteralGPU(const std::string &source,
+                                         std::string *gpuSource = nullptr);
 bool gpuIsAvailable();
 std::string gpuName();
 

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 
 namespace sconeml::tensor {
@@ -25,10 +26,12 @@ std::string metalDeviceName() {
   }
 }
 
-void runMetalKernel(const std::string &source, const float *input,
-                    float *output, std::size_t elementCount) {
+void runMetalKernel(const std::string &source, const int32_t *input,
+                    int32_t *output, std::size_t elementCount) {
   if (elementCount == 0)
     return;
+  if (elementCount > std::numeric_limits<uint32_t>::max())
+    throw std::runtime_error("tensor is too large for the Metal kernel");
 
   @autoreleasepool {
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -57,7 +60,7 @@ void runMetalKernel(const std::string &source, const float *input,
           "Metal pipeline creation failed: " +
           std::string([error.localizedDescription UTF8String]));
 
-    const std::size_t byteCount = elementCount * sizeof(float);
+    const std::size_t byteCount = elementCount * sizeof(int32_t);
     id<MTLBuffer> inputBuffer =
         [device newBufferWithBytes:input
                             length:byteCount

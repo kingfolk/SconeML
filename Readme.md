@@ -18,13 +18,13 @@ I would like to achieve these above features based on optimization passes or ext
 
 - [ ] efficient stack frame
 
-## Tensor IR and CPU runner
+## Tensor IR and runners
 
-SconeML now has a local tensor IR for dynamic rank-1 `f32` buffers.
+SconeML supports rank-1 integer tensor literals such as
+`let ts = [1, 2, 3] in ts * ts + 2 * ts + 1`.
 `letalg.tensor_map` contains a scalar region evaluated for every input element
-and writes the result to the matching output element. The supported scalar
-operations are `arith.constant`, `arith.addf`, `arith.subf`, `arith.mulf`, and
-`arith.divf`.
+and writes the result to the matching output element. The current frontend
+generates `i32` constants and element-wise addition, subtraction, and multiplication.
 
 The CPU runner lowers the operation through SCF and memref to the LLVM dialect,
 then executes native machine code through MLIR's execution engine:
@@ -41,12 +41,11 @@ cmake -S . -B build \
   -DMLIR_DIR="$(brew --prefix llvm@22)/lib/cmake/mlir" \
   -DCMAKE_CXX_COMPILER="$(brew --prefix llvm@22)/bin/clang++"
 cmake --build build --target tensor_targets -j4
-./build/tensor_targets
+./build/tensor_targets --cpu-only
 ```
 
-The test evaluates `x*x + 2*x + 1` and asserts the native result against the
-expected tensor. Tensor literals in the source parser, multidimensional shapes,
-reductions, fusion, allocation, and device placement are follow-ups.
+The tests compare the CPU result against expected values for several tensor
+expressions, including negative results and 32-bit overflow.
 
 On macOS, the GPU runner translates the same scalar region to Metal Shading
 Language, compiles it for the default Apple GPU, dispatches the kernel, and
@@ -57,8 +56,11 @@ letalg.tensor_map -> Metal Shading Language -> native Apple GPU
 ```
 
 Run the cross-target test on a Metal-capable machine with `./build/tensor_targets`.
-Other platforms keep the CPU test active and use a GPU runtime stub until a
-CUDA, ROCm, or SPIR-V backend is added.
+The GPU runner currently accepts a top-level tensor literal expression with one
+tensor map; it extracts the literal values from the translated IR. Other
+platforms keep the CPU test active and use a GPU runtime stub until a CUDA,
+ROCm, or SPIR-V backend is added. Multidimensional tensors and reductions are
+future work.
 
 ## ML in MLIR dialect
 

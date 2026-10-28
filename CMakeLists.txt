@@ -171,8 +171,8 @@ set_tests_properties(tensor_ir PROPERTIES
 add_test(NAME runner_cpu COMMAND tester --file let.ml)
 set_tests_properties(runner_cpu PROPERTIES
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tensor_cpu COMMAND tensor_targets --cpu-only)
 if(APPLE)
   add_test(NAME tensor_cross_target COMMAND tensor_targets)
-else()
-  add_test(NAME tensor_cpu COMMAND tensor_targets --cpu-only)
+  set_tests_properties(tensor_cross_target PROPERTIES SKIP_RETURN_CODE 77)
 endif()

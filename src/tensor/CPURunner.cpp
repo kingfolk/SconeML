@@ -1,4 +1,5 @@
 #include "src/tensor/CPURunner.h"
+#include "src/tensor/TensorFrontend.h"
 
 #include "src/parser/AstToLetAlg.h"
 #include "src/parser/Parser.h"
@@ -59,6 +60,22 @@ void lowerToLLVM(mlir::ModuleOp module) {
 
 } // namespace
 
+void translateTensorSource(mlir::ModuleOp module, const std::string &source) {
+  mlir::OpBuilder builder(module.getContext());
+  auto loc = builder.getUnknownLoc();
+  builder.setInsertionPointToStart(module.getBody());
+  auto function = mlir::func::FuncOp::create(
+      builder, loc, "tensor_literal", builder.getFunctionType({}, {}));
+  function->setAttr("llvm.emit_c_interface", builder.getUnitAttr());
+  builder.setInsertionPointToStart(function.addEntryBlock());
+
+  std::string mutableSource = source;
+  auto expression = sconeml::parse(mutableSource);
+  auto result = sconeml::translate(builder, expression.get());
+  function.setFunctionType(builder.getFunctionType({}, {result.getType()}));
+  sconeml::letalg::YieldOp::create(builder, loc, result);
+}
+
 std::vector<int32_t> runTensorLiteralCPU(const std::string &source,
                                          std::string *loweredLLVMIR) {
   static const bool initialized = [] {
@@ -79,31 +96,20 @@ std::vector<int32_t> runTensorLiteralCPU(const std::string &source,
   context.getOrLoadDialect<mlir::memref::MemRefDialect>();
   context.getOrLoadDialect<mlir::scf::SCFDialect>();
 
-  mlir::OpBuilder builder(&context);
-  auto loc = builder.getUnknownLoc();
-  auto module = mlir::ModuleOp::create(loc);
-  builder.setInsertionPointToStart(module.getBody());
-  auto function = mlir::func::FuncOp::create(
-      builder, loc, "tensor_literal", builder.getFunctionType({}, {}));
-  function->setAttr("llvm.emit_c_interface", builder.getUnitAttr());
-  builder.setInsertionPointToStart(function.addEntryBlock());
+  mlir::OwningOpRef<mlir::ModuleOp> module =
+      mlir::ModuleOp::create(mlir::UnknownLoc::get(&context));
+  translateTensorSource(*module, source);
 
-  std::string mutableSource = source;
-  auto expression = sconeml::parse(mutableSource);
-  auto result = sconeml::translate(builder, expression.get());
-  function.setFunctionType(builder.getFunctionType({}, {result.getType()}));
-  sconeml::letalg::YieldOp::create(builder, loc, result);
-
-  lowerToLLVM(module);
+  lowerToLLVM(*module);
   if (loweredLLVMIR) {
     llvm::raw_string_ostream stream(*loweredLLVMIR);
-    module.print(stream);
+    module->print(stream);
   }
 
   mlir::ExecutionEngineOptions options;
   auto transformer = mlir::makeOptimizingTransformer(2, 0, nullptr);
   options.transformer = transformer;
-  auto maybeEngine = mlir::ExecutionEngine::create(module, options);
+  auto maybeEngine = mlir::ExecutionEngine::create(*module, options);
   if (!maybeEngine)
     throwLLVMError(maybeEngine.takeError(), "could not create CPU JIT");
   std::unique_ptr<mlir::ExecutionEngine> engine = std::move(*maybeEngine);

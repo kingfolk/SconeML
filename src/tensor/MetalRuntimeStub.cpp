@@ -6,7 +6,7 @@ namespace sconeml::tensor {
 
 bool metalIsAvailable() { return false; }
 std::string metalDeviceName() { return "unavailable (Metal requires macOS)"; }
-void runMetalKernel(const std::string &, const float *, float *, std::size_t) {
+void runMetalKernel(const std::string &, const int32_t *, int32_t *, std::size_t) {
   throw std::runtime_error("the Metal GPU backend is only available on macOS");
 }
 
