@@ -37,9 +37,9 @@ Run the CPU assertion with:
 
 ```sh
 cmake -S . -B build \
-  -DLLVM_DIR="$(brew --prefix llvm)/lib/cmake/llvm" \
-  -DMLIR_DIR="$(brew --prefix llvm)/lib/cmake/mlir" \
-  -DCMAKE_CXX_COMPILER="$(brew --prefix llvm)/bin/clang++"
+  -DLLVM_DIR="$(brew --prefix llvm@22)/lib/cmake/llvm" \
+  -DMLIR_DIR="$(brew --prefix llvm@22)/lib/cmake/mlir" \
+  -DCMAKE_CXX_COMPILER="$(brew --prefix llvm@22)/bin/clang++"
 cmake --build build --target tensor_targets -j4
 ./build/tensor_targets
 ```
