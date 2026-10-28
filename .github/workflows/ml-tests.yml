@@ -19,11 +19,11 @@ jobs:
       - name: Install LLVM and build tools
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
-        run: brew install llvm cmake zstd
+        run: brew install llvm@22 cmake zstd
 
       - name: Configure
         run: |
-          LLVM_PREFIX="$(brew --prefix llvm)"
+          LLVM_PREFIX="$(brew --prefix llvm@22)"
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER="$LLVM_PREFIX/bin/clang" \
