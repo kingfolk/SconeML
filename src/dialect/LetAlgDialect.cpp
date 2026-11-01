@@ -1,5 +1,7 @@
 #include "LetAlgDialect.h"
 
+#include "mlir/Dialect/Arith/IR/Arith.h"
+
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dialect.h"
@@ -113,16 +115,45 @@ LogicalResult TensorMapOp::verify() {
       outputType.getRank() != 1 || inputType != outputType)
     return emitOpError(
         "expects matching rank-1 input and output memref buffers");
+  if (!inputType.getElementType().isSignlessInteger(32))
+    return emitOpError("expects i32 input and output elements");
+  if (getInput() == getOutput())
+    return emitOpError("expects distinct input and output buffers");
 
   if (getBody().empty() || !llvm::hasSingleElement(getBody()))
     return emitOpError("expects a single-block scalar body");
   Block &body = getBody().front();
   if (body.getNumArguments() != 1 ||
       body.getArgument(0).getType() != inputType.getElementType())
-    return emitOpError("expects one body argument matching the memref element type");
-  auto yield = dyn_cast<YieldOp>(body.getTerminator());
+    return emitOpError(
+        "expects one body argument matching the memref element type");
+  auto yield = body.empty() ? YieldOp() : dyn_cast<YieldOp>(&body.back());
   if (!yield || yield.getExpr().getType() != inputType.getElementType())
     return emitOpError("body must yield the memref element type");
+
+  // All dependencies, including the yielded value, must be local to the map.
+  // Supporting captures later requires an explicit operand/argument contract.
+  for (Operation &operation : body) {
+    for (Value operand : operation.getOperands())
+      if (operand.getParentBlock() != &body)
+        return emitOpError("body must not capture values from outside the map");
+    if (&operation == yield.getOperation())
+      continue;
+    if (!isMemoryEffectFree(&operation))
+      return emitOpError("body must be free of memory effects; found ")
+             << operation.getName();
+    if (!isa<arith::ConstantOp, arith::AddIOp, arith::SubIOp, arith::MulIOp>(
+            operation) ||
+        operation.getNumResults() != 1 ||
+        !operation.getResult(0).getType().isSignlessInteger(32))
+      return emitOpError(
+                 "body supports only i32 constants and add/sub/mul; found ")
+             << operation.getName();
+    if (auto flags =
+            dyn_cast<arith::ArithIntegerOverflowFlagsInterface>(&operation))
+      if (flags.hasNoSignedWrap() || flags.hasNoUnsignedWrap())
+        return emitOpError("body arithmetic must use wrapping i32 semantics");
+  }
   return success();
 }
 

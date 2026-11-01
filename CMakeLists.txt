@@ -129,6 +129,7 @@ else()
 endif()
 add_llvm_executable(tensor_targets
   test/tensor_targets.cpp
+  src/tensor/TensorFrontend.cpp
   src/tensor/CPURunner.cpp
   src/tensor/GPURunner.cpp
   ${SCONEML_GPU_RUNTIME}
@@ -165,6 +166,27 @@ target_include_directories(tensor_targets
 )
 
 enable_testing()
+add_llvm_executable(tensor_semantics
+  test/tensor_semantics.cpp
+  src/tensor/TensorFrontend.cpp
+  src/dialect/LetAlgDialect.cpp
+)
+target_compile_options(tensor_semantics PRIVATE -fexceptions)
+add_dependencies(tensor_semantics LetAlgDialectIncGen)
+target_link_libraries(tensor_semantics PRIVATE
+  MLIRArithDialect
+  MLIRFuncDialect
+  MLIRMemRefDialect
+  MLIRSCFDialect
+  MLIRParser
+  MLIRPass
+  MLIRTransforms
+  MLIRTransformUtils
+  MLIRIR
+  MLIRSupport
+)
+add_test(NAME tensor_semantics COMMAND tensor_semantics)
+
 add_test(NAME tensor_ir COMMAND tester --file tensor_literal.ml)
 set_tests_properties(tensor_ir PROPERTIES
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
