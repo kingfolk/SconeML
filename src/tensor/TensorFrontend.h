@@ -5,7 +5,8 @@
 #include <string>
 
 namespace sconeml::tensor {
-// Populate a module using the same parser and translation as the CPU runner.
+// Populate and verify a module using the shared CPU/GPU frontend.
+// Throws on translation or verification failure; no target code is executed.
 void translateTensorSource(mlir::ModuleOp module, const std::string &source);
 }
 

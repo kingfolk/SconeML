@@ -1,8 +1,7 @@
 #include "src/tensor/CPURunner.h"
 #include "src/tensor/TensorFrontend.h"
+#include "src/dialect/LetAlgDialect.h"
 
-#include "src/parser/AstToLetAlg.h"
-#include "src/parser/Parser.h"
 #include "src/conversion/ClosureConversion.h"
 #include "src/conversion/LowerTensorToSCF.h"
 #include "src/conversion/LowerToLLVM.h"
@@ -59,22 +58,6 @@ void lowerToLLVM(mlir::ModuleOp module) {
 }
 
 } // namespace
-
-void translateTensorSource(mlir::ModuleOp module, const std::string &source) {
-  mlir::OpBuilder builder(module.getContext());
-  auto loc = builder.getUnknownLoc();
-  builder.setInsertionPointToStart(module.getBody());
-  auto function = mlir::func::FuncOp::create(
-      builder, loc, "tensor_literal", builder.getFunctionType({}, {}));
-  function->setAttr("llvm.emit_c_interface", builder.getUnitAttr());
-  builder.setInsertionPointToStart(function.addEntryBlock());
-
-  std::string mutableSource = source;
-  auto expression = sconeml::parse(mutableSource);
-  auto result = sconeml::translate(builder, expression.get());
-  function.setFunctionType(builder.getFunctionType({}, {result.getType()}));
-  sconeml::letalg::YieldOp::create(builder, loc, result);
-}
 
 std::vector<int32_t> runTensorLiteralCPU(const std::string &source,
                                          std::string *loweredLLVMIR) {

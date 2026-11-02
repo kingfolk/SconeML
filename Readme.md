@@ -26,6 +26,17 @@ SconeML supports rank-1 integer tensor literals such as
 and writes the result to the matching output element. The current frontend
 generates `i32` constants and element-wise addition, subtraction, and multiplication.
 
+The CPU and GPU runners share `TensorFrontend.cpp`, which verifies the generated
+IR before target lowering. A tensor map body is isolated from enclosing values
+and accepts only i32 constants and wrapping addition, subtraction, and
+multiplication. Captures, memory effects inside the body, and other scalar
+operations are rejected. The map itself declares an input read and an output
+write, so it is not treated as a pure operation by optimization passes.
+
+Run the verifier, memory-effect, shared-frontend, and SCF lowering tests without
+a GPU with `cmake --build build --target tensor_semantics` followed by
+`ctest --test-dir build -R '^tensor_semantics$' --output-on-failure`.
+
 The CPU runner lowers the operation through SCF and memref to the LLVM dialect,
 then executes native machine code through MLIR's execution engine:
 

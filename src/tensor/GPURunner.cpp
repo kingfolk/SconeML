@@ -6,7 +6,6 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
-#include "mlir/IR/Verifier.h"
 #include <stdexcept>
 
 namespace sconeml::tensor {
@@ -96,8 +95,6 @@ std::vector<int32_t> runTensorLiteralGPU(const std::string &source,
   mlir::OwningOpRef<mlir::ModuleOp> module =
       mlir::ModuleOp::create(mlir::UnknownLoc::get(&context));
   translateTensorSource(*module, source);
-  if (mlir::failed(mlir::verify(*module)))
-    throw std::runtime_error("invalid tensor source IR");
   sconeml::letalg::TensorMapOp map;
   unsigned mapCount = 0;
   module->walk([&](sconeml::letalg::TensorMapOp candidate) {
