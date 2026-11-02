@@ -33,10 +33,10 @@ jobs:
             -DCMAKE_PREFIX_PATH="$(brew --prefix zstd)"
 
       - name: Build ML and tensor test runners
-        run: cmake --build build --target tester tensor_semantics tensor_targets --parallel 3
+        run: cmake --build build --target tester tensor_semantics tensor_gpu_lowering tensor_targets --parallel 3
 
       - name: Run all ML fixtures
         run: ./build/tester
 
-      - name: Run tensor semantics and CPU tests
-        run: ctest --test-dir build -R '^(tensor_semantics|tensor_cpu)$' --output-on-failure
+      - name: Run tensor semantics, GPU lowering, and CPU tests
+        run: ctest --test-dir build -R '^(tensor_semantics|tensor_gpu_lowering|tensor_cpu)$' --output-on-failure

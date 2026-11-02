@@ -37,6 +37,12 @@ Run the verifier, memory-effect, shared-frontend, and SCF lowering tests without
 a GPU with `cmake --build build --target tensor_semantics` followed by
 `ctest --test-dir build -R '^tensor_semantics$' --output-on-failure`.
 
+An independent [GPU kernel extraction](docs/gpu-kernel-lowering.md) API converts
+a verified tensor map into `gpu.module` / `gpu.func` with explicit buffer/count
+arguments, thread indexing, and guarded loads/stores. This device-IR path is
+tested without a GPU; the existing Metal runner still uses its original MSL
+generation path until an exporter and execution integration are implemented.
+
 The CPU runner lowers the operation through SCF and memref to the LLVM dialect,
 then executes native machine code through MLIR's execution engine:
 
