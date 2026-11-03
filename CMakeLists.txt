@@ -166,6 +166,32 @@ target_include_directories(tensor_targets
 )
 
 enable_testing()
+
+add_library(SconeMLTensorGPU STATIC src/conversion/LowerTensorToGPU.cpp)
+add_dependencies(SconeMLTensorGPU LetAlgDialectIncGen)
+target_link_libraries(SconeMLTensorGPU PUBLIC
+  MLIRArithDialect
+  MLIRGPUDialect
+  MLIRMemRefDialect
+  MLIRSCFDialect
+  MLIRIR
+  MLIRSupport
+)
+
+add_llvm_executable(tensor_gpu_lowering
+  test/tensor_gpu_lowering.cpp
+  src/tensor/TensorFrontend.cpp
+  src/dialect/LetAlgDialect.cpp
+)
+target_compile_options(tensor_gpu_lowering PRIVATE -fexceptions)
+add_dependencies(tensor_gpu_lowering LetAlgDialectIncGen)
+target_link_libraries(tensor_gpu_lowering PRIVATE
+  SconeMLTensorGPU MLIRFuncDialect MLIRParser
+)
+add_test(NAME tensor_gpu_lowering COMMAND tensor_gpu_lowering
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/kernel_lowering/shared_square.mlir
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/kernel_lowering/shared_square_gpu.mlir)
+
 add_llvm_executable(tensor_semantics
   test/tensor_semantics.cpp
   src/tensor/TensorFrontend.cpp
