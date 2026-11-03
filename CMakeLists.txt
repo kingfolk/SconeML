@@ -186,11 +186,38 @@ add_llvm_executable(tensor_gpu_lowering
 target_compile_options(tensor_gpu_lowering PRIVATE -fexceptions)
 add_dependencies(tensor_gpu_lowering LetAlgDialectIncGen)
 target_link_libraries(tensor_gpu_lowering PRIVATE
-  SconeMLTensorGPU MLIRFuncDialect MLIRParser
+  SconeMLTensorGPU SconeMLMetalExporter MLIRFuncDialect MLIRParser
 )
 add_test(NAME tensor_gpu_lowering COMMAND tensor_gpu_lowering
   ${CMAKE_CURRENT_SOURCE_DIR}/test/kernel_lowering/shared_square.mlir
   ${CMAKE_CURRENT_SOURCE_DIR}/test/kernel_lowering/shared_square_gpu.mlir)
+
+# MSL generation is ordinary C++; device compilation is a separate Apple test.
+add_library(SconeMLMetalExporter STATIC src/conversion/MetalExporter.cpp)
+target_link_libraries(SconeMLMetalExporter PUBLIC
+  MLIRArithDialect MLIRGPUDialect MLIRMemRefDialect MLIRSCFDialect MLIRIR MLIRSupport
+)
+add_llvm_executable(metal_exporter test/metal_exporter.cpp)
+target_compile_options(metal_exporter PRIVATE -fexceptions)
+target_link_libraries(metal_exporter PRIVATE SconeMLMetalExporter MLIRParser)
+set(SCONEML_EXPORTED_MSL_DIR ${CMAKE_CURRENT_BINARY_DIR}/exported-msl)
+add_test(NAME metal_exporter COMMAND metal_exporter
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/kernel_lowering/shared_square_gpu.mlir
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/metal_exporter/shared_square.metal
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/metal_exporter/integer_bits.mlir
+  ${SCONEML_EXPORTED_MSL_DIR})
+set_tests_properties(metal_exporter PROPERTIES FIXTURES_SETUP exported_msl)
+if(APPLE)
+  add_llvm_executable(metal_exporter_compile test/metal_exporter_compile.mm)
+  target_compile_options(metal_exporter_compile PRIVATE -fobjc-arc)
+  target_link_libraries(metal_exporter_compile PRIVATE
+    "-framework Foundation" "-framework Metal")
+  add_test(NAME metal_exporter_compile COMMAND metal_exporter_compile
+    ${SCONEML_EXPORTED_MSL_DIR}/shared.metal
+    ${SCONEML_EXPORTED_MSL_DIR}/integer.metal)
+  set_tests_properties(metal_exporter_compile PROPERTIES
+    FIXTURES_REQUIRED exported_msl SKIP_RETURN_CODE 77)
+endif()
 
 add_llvm_executable(tensor_semantics
   test/tensor_semantics.cpp
