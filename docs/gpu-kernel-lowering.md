@@ -53,28 +53,17 @@ Verification does not prove runtime buffer capacity, allocation non-aliasing, or
 
 ## Tests
 
-Build and run without a GPU:
+GPU extraction is covered by the [unified data runner](testing.md). Build and run its self-contained case without a GPU:
 
 ```sh
-cmake -S . -B build
-cmake --build build --target tensor_gpu_lowering -j3
-ctest --test-dir build -R '^tensor_gpu_lowering$' --output-on-failure
+cmake --build build --target tester -j3
+./build/tester --file test/kernel_lowering/shared_square.mlir
 ```
 
-To inspect the generated device IR alongside the test output:
+The [shared-square file](../test/kernel_lowering/shared_square.mlir) contains the source IR, complete expected GPU IR, SSA capture checks, and expected MSL. The runner compares IR structures, verifies round-trip parsing and input preservation, and checks shared SSA dependencies. Source-language polynomial, subtraction, identity and overflow cases live under test/tensor; invalid maps and layouts have independent data files.
 
-```sh
-./build/tensor_gpu_lowering \
-  test/kernel_lowering/shared_square.mlir \
-  test/kernel_lowering/shared_square_gpu.mlir --dump
-```
-
-The handwritten [source fixture](../test/kernel_lowering/shared_square.mlir) computes a square once and adds it to itself. The [expected fixture](../test/kernel_lowering/shared_square_gpu.mlir) is a structural assertion: the test compares types, attributes, operations, and SSA dependencies while ignoring source locations. It also explicitly checks SSA sharing and verifies that the source module was not modified.
-
-Additional tests cover print/parse round trips, capture rejection, unsupported scalar operations, invalid yields, incompatible layouts/memory spaces, and extraction from frontend-generated polynomial, subtraction, and identity maps.
-
-`SconeMLTensorGPU` contains the production transformation. The test links the LetAlg implementation and shared frontend alongside it, with no CPU runner, ExecutionEngine, or Metal frameworks. CI builds and runs the new test as part of the tensor checks.
+The production transformation remains in SconeMLTensorGPU. A separate small interface executable checks standalone frontend linkage without the CPU runner/ExecutionEngine.
 
 ## Execution status
 
-This change stops at verified device IR. It does not export MSL, generate a host launch, or execute the GPU kernel. The existing Metal runner continues to use its original expression-to-MSL implementation. Its replacement requires the subsequent exporter and runner integration work.
+The new extraction/export path is tested through MSL generation and optional Metal compilation. The public GPU runner continues to use its original expression-to-MSL implementation until dispatch integration is implemented.

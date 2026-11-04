@@ -1,6 +1,8 @@
 #ifndef SCONEML_UNWRAP_LET_H
 #define SCONEML_UNWRAP_LET_H
 
+#include "src/dialect/LetAlgDialect.h"
+
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Operation.h"
@@ -38,7 +40,7 @@ struct UnwrapLetPass : public mlir::PassWrapper<UnwrapLetPass, mlir::OperationPa
   }
 };
 
-std::unique_ptr<mlir::Pass> createUnwrapLetPass() { return std::make_unique<UnwrapLetPass>(); }
+inline std::unique_ptr<mlir::Pass> createUnwrapLetPass() { return std::make_unique<UnwrapLetPass>(); }
 
 }
 #endif // SCONEML_UNWRAP_LET_H

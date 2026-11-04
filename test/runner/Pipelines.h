@@ -1,0 +1,20 @@
+#ifndef SCONEML_TEST_PIPELINES_H
+#define SCONEML_TEST_PIPELINES_H
+#include "mlir/IR/MLIRContext.h"
+#include "test/runner/TestSpec.h"
+#include <memory>
+
+namespace sconeml::test {
+struct Output {
+  bool success = false, skipped = false;
+  std::string stage, diagnostic, ir, text, effects, entrypoint;
+  std::optional<Number> number;
+  std::optional<bool> sourceUnchanged;
+};
+std::unique_ptr<mlir::MLIRContext> makeContext();
+Output execute(const TestCase &test, const Run &run, bool disableMetal);
+void compileMetal(const std::string &source, const std::string &entrypoint);
+void checkAssertions(const TestCase &test, const Run &run, const Output &output,
+                     const std::map<std::string, Output> &previous);
+} // namespace sconeml::test
+#endif

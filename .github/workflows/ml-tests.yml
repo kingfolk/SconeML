@@ -32,11 +32,8 @@ jobs:
             -DMLIR_DIR="$LLVM_PREFIX/lib/cmake/mlir" \
             -DCMAKE_PREFIX_PATH="$(brew --prefix zstd)"
 
-      - name: Build ML and tensor test runners
-        run: cmake --build build --target tester tensor_semantics tensor_gpu_lowering metal_exporter metal_exporter_compile tensor_targets --parallel 3
+      - name: Build unified test runner and interface tests
+        run: cmake --build build --target tester tensor_interfaces --parallel 3
 
-      - name: Run all ML fixtures
-        run: ./build/tester
-
-      - name: Run tensor semantics, GPU export, and CPU tests
-        run: ctest --test-dir build -R '^(tensor_semantics|tensor_gpu_lowering|metal_exporter|metal_exporter_compile|tensor_cpu)$' --output-on-failure
+      - name: Run compiler data suite and runner contracts
+        run: ctest --test-dir build --output-on-failure
