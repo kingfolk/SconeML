@@ -10,6 +10,21 @@
 #include "llvm/Support/raw_ostream.h"
 
 namespace sconeml::test {
+static std::string numericDifference(const Number &expected, const Number &actual) {
+  if (expected.tensor != actual.tensor)
+    return "; scalar/tensor kind differs";
+  if (expected.values.size() != actual.values.size())
+    return "; element count differs: expected " +
+           std::to_string(expected.values.size()) + ", actual " +
+           std::to_string(actual.values.size());
+  for (size_t i = 0; i < expected.values.size(); ++i)
+    if (expected.values[i] != actual.values[i])
+      return "; first differing element [" + std::to_string(i) + "]: expected " +
+             std::to_string(expected.values[i]) + ", actual " +
+             std::to_string(actual.values[i]);
+  return "";
+}
+
 static void fileCheck(const std::string &expected, const std::string &actual,
                       const std::string &label) {
   llvm::FileCheckRequest request;
@@ -81,12 +96,15 @@ void checkAssertions(const TestCase &test, const Run &run, const Output &output,
       require(output.number && *output.number == expected,
               "expected " + formatNumber(expected) + ", actual " +
                   (output.number ? formatNumber(*output.number)
-                                 : "no numeric result"));
+                                 : "no numeric result") +
+                  (output.number ? numericDifference(expected, *output.number) : ""));
     } else if (assertion.kind == "compare") {
       const auto &other = previous.at(assertion.value);
       require(other.success && other.number && output.number &&
                   *other.number == *output.number,
-              "numeric result differs from run " + assertion.value);
+              "numeric result differs from run " + assertion.value +
+                  (other.number && output.number
+                       ? numericDifference(*other.number, *output.number) : ""));
     } else if (assertion.kind == "source-unchanged") {
       require(output.sourceUnchanged.value_or(false),
               "input IR changed or pipeline has no preservation contract");

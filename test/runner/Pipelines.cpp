@@ -133,6 +133,10 @@ Output execute(const TestCase &test, const Run &run, bool disableMetal) {
       output.success = mlir::succeeded(mlir::verify(*module));
       return output;
     }
+    if (run.pipeline == "tensor-cpu-ir" || run.pipeline == "tensor-metal-ir") {
+      executeMapIR(*module, test, run, output, disableMetal);
+      return output;
+    }
     const bool legacy = run.pipeline.starts_with("legacy-");
     if (legacy) {
       require(test.input == "source", "legacy pipeline requires source");

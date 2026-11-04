@@ -6,11 +6,11 @@
 
 ```sh
 cmake -S . -B build
-cmake --build build --target tester tensor_interfaces metal_runtime_checks -j3
+cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks -j3
 ctest --test-dir build --output-on-failure
 ```
 
-`compiler_suite` runs all compiler data files. `runner_contracts` checks the runner's error handling, selection, and device policy. `tensor_interfaces` retains two C++ API checks: frontend linkage without CPURunner/ExecutionEngine, and rejection of malformed in-memory IR that the text parser cannot construct. Both API tests read their programs from the regular data files. `metal_runtime_contracts` additionally checks synthetic capacity/launch limits and an empty runtime call without allocating large tensors. It also checks compilation-error propagation when a device is available.
+`compiler_suite` runs all compiler data files. `runner_contracts` checks the runner's error handling, selection, and device policy. `tensor_interfaces` retains two C++ API checks: frontend linkage without CPURunner/ExecutionEngine, and rejection of malformed in-memory IR that the text parser cannot construct. Both API tests read their programs from the regular data files. `metal_runtime_contracts` additionally checks synthetic capacity/launch limits and an empty runtime call without allocating large tensors. It also checks compilation/entrypoint-error propagation when a device is available. `metal_stub_contracts` builds the non-Apple implementation explicitly, including on macOS, and checks its empty/nonempty behavior. `reference_fixtures` uses Python 3 to check independent oracle anchors and reproducible fixture contents without rewriting files.
 
 The runner defaults to the project's `test` directory, independent of the working directory. It discovers `.ml` and `.mlir` files recursively in sorted order. Useful selections are:
 
@@ -54,7 +54,7 @@ let ts = [1, 2, 3] in ts * ts + 2 * ts + 1
 
 Every run starts with its own context and newly translated/parsed module. Destructive optimization or lowering in one run cannot affect another.
 
-`version`, `input`, and `runs` are required YAML fields. Each run has `name` and `pipeline`, plus optional positive `threads-per-group` for `tensor-metal` only. Omitting the width selects the runtime default. Unknown/duplicate YAML fields, duplicate names or assertion kinds, assertions for unknown runs, empty programs, and missing assertions fail validation before execution. Assertion kinds must be supported by their pipeline. Arbitrary shell commands and pass scripts are not supported.
+`version`, `input`, and `runs` are required YAML fields. Each run has `name` and `pipeline`, plus optional positive `threads-per-group` for `tensor-metal` or `tensor-metal-ir`. Omitting the width selects the runtime default. Unknown/duplicate YAML fields, duplicate names or assertion kinds, assertions for unknown runs, empty programs, and missing assertions fail validation before execution. Assertion kinds must be supported by their pipeline. Arbitrary shell commands and pass scripts are not supported.
 
 ## IR format
 
@@ -97,6 +97,44 @@ An `ir-equal` or `text-equal` block contains the complete expected output, using
 Legacy `@letalg:opt` and `@runner:cpu` blocks continue to run unchanged. Their implicit `legacy-letalg`/`legacy-cpu` adapters preserve the previous scope/closure pipeline, function representation, exact-text matching, and scalar results. They do not silently add canonicalization. Legacy and version-1 metadata cannot be mixed in one file.
 
 `tensor-metal` replaces the former `tensor-metal-legacy` adapter after runtime integration. Existing tensor execution cases now exercise the new exporter path. For dispatch boundaries see `test/tensor/dispatch`: a width of 4 is configured alongside the program and expected result in each file.
+
+## Executing raw map IR
+
+`tensor-cpu-ir` and `tensor-metal-ir` execute a test-only static rank-1 i32 map
+with explicit signed host data. They let tests cover negative inputs, extreme
+constants and shared SSA without changing the source grammar or public runner
+API. The file-level `tensor-input` YAML array is required for these pipelines
+and must exactly match the static shape. Empty arrays are supported. The field
+is rejected on source cases or when no IR execution run consumes it.
+
+The module must contain exactly one function with two buffer arguments, no
+results, and a body containing only the map followed by `func.return`. Layout
+must be identity in the default host memory space. Wrapper/length errors are
+reported as `runner`, so they cannot satisfy expected compiler-error assertions.
+
+| Pipeline | Execution and assertions |
+| --- | --- |
+| `tensor-cpu-ir` | Production SCF lowering followed by standard LLVM lowering/JIT; result, compare, lowered IR and success/error |
+| `tensor-metal-ir` | Production GPU lowering, exporter and runtime; result, compare, GPU IR, MSL, entrypoint, preservation and success/error |
+
+See [031-shared.mlir](../test/acceptance/ir/031-shared.mlir) for a complete
+example with host input, CPU execution, explicit/default-width Metal execution,
+full expected arrays and SSA sharing checks. CPU calls use guarded host buffers
+and check that input and output canaries are preserved. Numeric failures report
+the first differing element. GPU execution uses the normal runtime's exact-size
+Metal buffers; the host canaries are not a claim of GPU memory instrumentation.
+
+Each Metal IR run lowers and exports before deciding device availability.
+Nonempty runs skip if Metal is unavailable or disabled; strict mode rejects
+those skips. Empty runs invoke the runtime no-op and pass without a device,
+including under `--no-metal`, because no compilation or dispatch is needed.
+
+[generate.py](../test/reference/generate.py) independently computes expected
+values with masked Python integers. It never executes the compiler or reads
+actual backend results. Run `python3 test/reference/generate.py --check` to
+verify the committed fixture set, or omit `--check` to deliberately regenerate
+it. Ordinary `tester` reads these self-contained files and never runs scripts.
+See the [acceptance record](m1-acceptance.md) for the seed, matrix and results.
 
 ## Assertions
 

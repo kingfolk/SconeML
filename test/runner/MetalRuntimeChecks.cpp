@@ -74,6 +74,12 @@ int main() {
       runMetalKernel("", "", input, output, 2);
     });
     require(output[0] == 123, "rejected launch modified host output");
+#ifdef SCONEML_EXPECT_METAL_STUB
+    require(!metalIsAvailable(), "stub unexpectedly reports an available device");
+    rejects("only available on macOS", [&] {
+      runMetalKernel("", "tensor_map", input, output, 1);
+    });
+#endif
     if (metalIsAvailable()) {
       rejects("Metal compilation failed", [&] {
         runMetalKernel("invalid Metal source", "tensor_map", input, output, 1);
