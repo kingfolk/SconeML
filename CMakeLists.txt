@@ -143,6 +143,7 @@ target_sources(tester PRIVATE
   src/tensor/TensorFrontend.cpp
   src/tensor/CPURunner.cpp
   src/tensor/GPURunner.cpp
+  src/tensor/MetalLaunch.cpp
   ${SCONEML_GPU_RUNTIME}
   ${SCONEML_TEST_METAL})
 target_compile_definitions(tester PRIVATE SCONEML_TEST_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/test")
@@ -167,11 +168,21 @@ add_dependencies(tensor_interfaces LetAlgDialectIncGen)
 target_link_libraries(tensor_interfaces PRIVATE
   SconeMLTestSpec SconeMLTensorGPU SconeMLMetalExporter MLIR)
 
+add_executable(metal_runtime_checks
+  test/runner/MetalRuntimeChecks.cpp
+  src/tensor/MetalLaunch.cpp
+  ${SCONEML_GPU_RUNTIME})
+target_compile_options(metal_runtime_checks PRIVATE -fexceptions)
+if(APPLE)
+  target_link_libraries(metal_runtime_checks PRIVATE "-framework Foundation" "-framework Metal")
+endif()
+
 enable_testing()
 add_test(NAME compiler_suite COMMAND tester)
 add_test(NAME tensor_interfaces COMMAND tensor_interfaces
   ${CMAKE_CURRENT_SOURCE_DIR}/test/tensor/polynomial.ml
   ${CMAKE_CURRENT_SOURCE_DIR}/test/metal_exporter/shared_square.mlir)
+add_test(NAME metal_runtime_contracts COMMAND metal_runtime_checks)
 add_test(NAME runner_contracts COMMAND ${CMAKE_COMMAND}
   -DRUNNER=$<TARGET_FILE:tester>
   -DDATA_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/test

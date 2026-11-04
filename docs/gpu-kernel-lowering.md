@@ -66,4 +66,4 @@ The production transformation remains in SconeMLTensorGPU. A separate small inte
 
 ## Execution status
 
-The new extraction/export path is tested through MSL generation and optional Metal compilation. The public GPU runner continues to use its original expression-to-MSL implementation until dispatch integration is implemented.
+The public GPU runner now uses this extraction API and the independent MSL exporter for actual Metal execution. The `tensor-metal` data pipeline verifies numeric results with uniform padded dispatch; see [Metal runtime integration](metal-runtime.md). Lowering/export-only checks remain runnable without a device.

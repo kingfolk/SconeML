@@ -1,4 +1,6 @@
 #include "src/tensor/GPURunner.h"
+#include "src/conversion/LowerTensorToGPU.h"
+#include "src/conversion/MetalExporter.h"
 #include "src/dialect/LetAlgDialect.h"
 #include "src/tensor/MetalRuntime.h"
 #include "src/tensor/TensorFrontend.h"
@@ -17,26 +19,6 @@ int64_t constantInteger(mlir::Value value) {
   if (!attr)
     throw std::runtime_error("GPU tensor literal requires integer constants");
   return attr.getInt();
-}
-
-std::string emitMetalExpression(mlir::Value value,
-                                mlir::BlockArgument scalarArgument) {
-  if (value == scalarArgument) return "x";
-  mlir::Operation *definition = value.getDefiningOp();
-  if (!definition)
-    throw std::runtime_error("unsupported free value in tensor map body");
-  if (mlir::isa<mlir::arith::ConstantOp>(definition))
-    return "uint(" + std::to_string(constantInteger(value)) + ")";
-  auto binary = [&](const char *symbol) {
-    return "(" + emitMetalExpression(definition->getOperand(0), scalarArgument) +
-           " " + symbol + " " +
-           emitMetalExpression(definition->getOperand(1), scalarArgument) + ")";
-  };
-  if (mlir::isa<mlir::arith::AddIOp>(definition)) return binary("+");
-  if (mlir::isa<mlir::arith::SubIOp>(definition)) return binary("-");
-  if (mlir::isa<mlir::arith::MulIOp>(definition)) return binary("*");
-  throw std::runtime_error("unsupported operation in Metal tensor map: " +
-                           definition->getName().getStringRef().str());
 }
 
 std::vector<int32_t> readLiteral(sconeml::letalg::TensorMapOp map) {
@@ -64,28 +46,11 @@ std::vector<int32_t> readLiteral(sconeml::letalg::TensorMapOp map) {
   return values;
 }
 
-std::string translateTensorMapToMetal(sconeml::letalg::TensorMapOp map) {
-  mlir::Block &body = map.getBody().front();
-  auto yield = mlir::cast<sconeml::letalg::YieldOp>(body.getTerminator());
-  std::string expression = emitMetalExpression(yield.getExpr(), body.getArgument(0));
-  // Unsigned arithmetic preserves i32 modulo-2^32 behavior on overflow.
-  return R"metal(#include <metal_stdlib>
-using namespace metal;
-
-kernel void tensor_map(device const uint *input [[buffer(0)]],
-                       device uint *output [[buffer(1)]],
-                       constant uint &count [[buffer(2)]],
-                       uint index [[thread_position_in_grid]]) {
-  if (index >= count) return;
-  uint x = input[index];
-  output[index] = )metal" + expression + R"metal(;
-}
-)metal";
-}
 } // namespace
 
 std::vector<int32_t> runTensorLiteralGPU(const std::string &source,
-                                         std::string *gpuSource) {
+                                       std::string *gpuSource,
+                                       MetalLaunchOptions options) {
   mlir::MLIRContext context;
   context.getOrLoadDialect<sconeml::letalg::LetAlgDialect>();
   context.getOrLoadDialect<mlir::arith::ArithDialect>();
@@ -116,10 +81,16 @@ std::vector<int32_t> runTensorLiteralGPU(const std::string &source,
   if (!result || result.getExpr() != let.getResult())
     throw std::runtime_error("GPU runner requires a top-level tensor literal expression");
   auto input = readLiteral(map);
-  std::string metal = translateTensorMapToMetal(map);
-  if (gpuSource) *gpuSource = metal;
+  auto device = sconeml::lowerTensorMapToGPU(map);
+  if (mlir::failed(device))
+    throw std::runtime_error("GPU tensor map lowering failed");
+  auto kernel = sconeml::exportMetalKernel(**device);
+  if (mlir::failed(kernel))
+    throw std::runtime_error("GPU Metal export failed");
+  if (gpuSource) *gpuSource = kernel->source;
   std::vector<int32_t> output(input.size());
-  runMetalKernel(metal, input.data(), output.data(), input.size());
+  runMetalKernel(kernel->source, kernel->entrypoint, input, output, input.size(),
+                 options);
   return output;
 }
 bool gpuIsAvailable() { return metalIsAvailable(); }

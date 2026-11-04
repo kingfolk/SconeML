@@ -49,14 +49,14 @@ The index formula uses `threadgroup_position_in_grid.x * threads_per_threadgroup
 - Check count, buffer capacities, separate input/output allocations, and the u32 range of padded indices before execution.
 - Avoid nonuniform final groups whose actual width could change the meaning of `block_id * block_dim`.
 
-MLIR index width is target-dependent. This exporter accepts the validated F2 pattern under the above u32 launch contract; it is not a general index-width lowering. Runtime checks and dispatch integration remain subsequent work.
+MLIR index width is target-dependent. This exporter accepts the validated F2 pattern under the above u32 launch contract; it is not a general index-width lowering. The [Metal runtime](metal-runtime.md) implements these launch and capacity checks.
 
 ## Tests
 
 Exporter cases now run through the [unified data runner](testing.md). The [shared-square case](../test/metal_exporter/shared_square.mlir) contains GPU IR, a complete expected shader, preservation assertions and a device-compilation run in one file. The [integer-bit case](../test/metal_exporter/integer_bits.mlir) similarly checks the complete MSL for negative/extreme constants and all three arithmetic operators.
 
 ```sh
-cmake --build build --target tester tensor_interfaces -j3
+cmake --build build --target tester tensor_interfaces metal_runtime_checks -j3
 ./build/tester --suite test/metal_exporter --no-metal
 ./build/tester --suite test/metal_exporter --run compile --require-metal
 ```
@@ -67,4 +67,4 @@ SconeMLMetalExporter is still ordinary C++ with no device API calls. The two rem
 
 ## Execution status
 
-The public GPU runner still uses its original expression-to-MSL path. Dispatch integration and its uniform-threadgroup/u32 capacity checks remain F4 work. Compilation success is not proof of execution or numeric results.
+The public GPU runner now extracts GPU IR, invokes this exporter, and passes the returned source and entrypoint to the one-shot Metal runtime. The recursive expression emitter has been removed. The `tensor-metal` test pipeline checks actual dispatch and numeric results; `metal-compile` continues to check compilation/pipeline creation only. See [runtime integration](metal-runtime.md) for launch geometry, bounds, and device validation commands.

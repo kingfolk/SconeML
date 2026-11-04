@@ -83,7 +83,7 @@ Output execute(const TestCase &test, const Run &run, bool disableMetal) {
         return mlir::success();
       });
   try {
-    if (run.pipeline == "tensor-cpu" || run.pipeline == "tensor-metal-legacy") {
+    if (run.pipeline == "tensor-cpu" || run.pipeline == "tensor-metal") {
       require(test.input == "source",
               "execution pipeline requires source input");
       // Surface frontend diagnostics through this run's handler before the
@@ -104,7 +104,8 @@ Output execute(const TestCase &test, const Run &run, bool disableMetal) {
           return output;
         }
         output.number = Number{true, sconeml::tensor::runTensorLiteralGPU(
-                                         test.program, &output.text)};
+                                         test.program, &output.text,
+                                         {run.threadsPerThreadgroup.value_or(0)})};
       }
       output.success = true;
       return output;

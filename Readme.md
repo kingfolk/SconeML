@@ -35,7 +35,7 @@ write, so it is not treated as a pure operation by optimization passes.
 
 The [unified test runner](docs/testing.md) reads programs, pipeline configuration,
 and assertions from the same `.ml` or `.mlir` file. Run compiler tests without a
-GPU with `cmake --build build --target tester tensor_interfaces` followed by
+GPU with `cmake --build build --target tester tensor_interfaces metal_runtime_checks` followed by
 `./build/tester --no-metal`.
 
 An independent [GPU kernel extraction](docs/gpu-kernel-lowering.md) API converts
@@ -43,9 +43,8 @@ a verified tensor map into `gpu.module` / `gpu.func` with explicit buffer/count
 arguments, thread indexing, and guarded loads/stores. This device-IR path is
 tested without a GPU. An independent [MSL exporter](docs/metal-exporter.md)
 converts that restricted kernel IR into Metal source, with per-SSA temporaries
-and explicit unsigned integer semantics. Exported shaders have separate Metal
-compilation/pipeline tests. The existing Metal runner still uses its original
-MSL generation path until execution integration is implemented.
+and explicit unsigned integer semantics. The [Metal runtime](docs/metal-runtime.md) executes these exported shaders
+with uniform, padded threadgroups and checked input/output/count bindings.
 
 The CPU runner lowers the operation through SCF and memref to the LLVM dialect,
 then executes native machine code through MLIR's execution engine:
@@ -61,7 +60,7 @@ cmake -S . -B build \
   -DLLVM_DIR="$(brew --prefix llvm@22)/lib/cmake/llvm" \
   -DMLIR_DIR="$(brew --prefix llvm@22)/lib/cmake/mlir" \
   -DCMAKE_CXX_COMPILER="$(brew --prefix llvm@22)/bin/clang++"
-cmake --build build --target tester tensor_interfaces -j3
+cmake --build build --target tester tensor_interfaces metal_runtime_checks -j3
 ./build/tester --suite test/tensor --run cpu
 ```
 
@@ -73,13 +72,13 @@ Language, compiles it for the default Apple GPU, dispatches the kernel, and
 compares every result element against both the expected tensor and the CPU JIT:
 
 ```text
-letalg.tensor_map -> Metal Shading Language -> native Apple GPU
+letalg.tensor_map -> GPU kernel IR -> Metal Shading Language -> native Apple GPU
 ```
 
 Run cross-target cases with
 `./build/tester --suite test/tensor --require-metal` on a Metal-capable machine.
-The explicitly named `tensor-metal-legacy` test pipeline exercises the existing
-GPU runner; `tensor-msl` and `metal-compile` test the new exporter separately.
+The `tensor-metal` pipeline executes the GPU IR/exporter path; `tensor-msl`
+and `metal-compile` also allow checking export and compilation independently.
 The GPU runner currently accepts a top-level tensor literal expression with one
 tensor map; it extracts the literal values from the translated IR. Other
 platforms keep the CPU test active and use a GPU runtime stub until a CUDA,

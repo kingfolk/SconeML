@@ -8,6 +8,9 @@ runs:
     pipeline: tensor-gpu-ir
   - name: shader
     pipeline: tensor-msl
+  - name: metal
+    pipeline: tensor-metal
+    threads-per-group: 4
 *)
 (* @assert:cpu:result
 [1]
@@ -20,5 +23,8 @@ CHECK-NEXT: memref.store %[[E]]
 (* @assert:shader:text-check
 CHECK: input[
 CHECK-NEXT: output[
+*)
+(* @assert:metal:compare
+cpu
 *)
 let xs = [1] in xs

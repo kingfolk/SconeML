@@ -26,6 +26,7 @@ template <> struct MappingTraits<sconeml::test::Run> {
   static void mapping(IO &io, sconeml::test::Run &run) {
     io.mapRequired("name", run.name);
     io.mapRequired("pipeline", run.pipeline);
+    io.mapOptional("threads-per-group", run.threadsPerThreadgroup);
   }
 };
 template <> struct MappingTraits<sconeml::test::Config> {
@@ -73,14 +74,14 @@ bool knownPipeline(const std::string &name) {
   static const std::set<std::string> names{
       "verify",         "letalg",        "letalg-opt",          "tensor-scf",
       "tensor-effects", "tensor-gpu-ir", "tensor-msl",          "metal-compile",
-      "tensor-cpu",     "scalar-cpu",    "tensor-metal-legacy", "legacy-letalg",
+      "tensor-cpu",     "scalar-cpu",    "tensor-metal",        "legacy-letalg",
       "legacy-cpu"};
   return names.contains(name);
 }
 
 static bool numericPipeline(const std::string &pipeline) {
   return pipeline == "tensor-cpu" || pipeline == "scalar-cpu" ||
-         pipeline == "legacy-cpu" || pipeline == "tensor-metal-legacy";
+         pipeline == "legacy-cpu" || pipeline == "tensor-metal";
 }
 
 static bool supports(const std::string &pipeline, const std::string &kind) {
@@ -102,7 +103,7 @@ static bool supports(const std::string &pipeline, const std::string &kind) {
            pipeline == "metal-compile" || pipeline == "tensor-cpu";
   return pipeline == "letalg" || pipeline == "letalg-opt" ||
          pipeline == "legacy-letalg" || pipeline == "tensor-msl" ||
-         pipeline == "metal-compile" || pipeline == "tensor-metal-legacy";
+         pipeline == "metal-compile" || pipeline == "tensor-metal";
 }
 
 ExpectedError parseError(const std::string &text) {
@@ -258,7 +259,14 @@ TestCase parseCase(const std::string &path, const std::string &text) {
     require(!run.name.empty() && names.insert(run.name).second,
             "empty or duplicate run name: " + run.name);
     require(knownPipeline(run.pipeline), "unknown pipeline: " + run.pipeline);
-    if (run.pipeline == "tensor-cpu" || run.pipeline == "tensor-metal-legacy" ||
+    require(!run.threadsPerThreadgroup || run.pipeline == "tensor-metal",
+            "threads-per-group is only supported by tensor-metal");
+    require(!run.threadsPerThreadgroup || *run.threadsPerThreadgroup > 0,
+            "threads-per-group must be positive");
+    require(!run.threadsPerThreadgroup ||
+                *run.threadsPerThreadgroup <= std::numeric_limits<std::size_t>::max(),
+            "threads-per-group exceeds host size range");
+    if (run.pipeline == "tensor-cpu" || run.pipeline == "tensor-metal" ||
         run.pipeline == "scalar-cpu" || run.pipeline.starts_with("legacy-"))
       require(test.input == "source",
               "execution/legacy pipeline requires source input");
