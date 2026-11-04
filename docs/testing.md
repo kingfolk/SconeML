@@ -6,11 +6,11 @@
 
 ```sh
 cmake -S . -B build
-cmake --build build --target tester tensor_interfaces -j3
+cmake --build build --target tester tensor_interfaces metal_runtime_checks -j3
 ctest --test-dir build --output-on-failure
 ```
 
-`compiler_suite` runs all compiler data files. `runner_contracts` checks the runner's error handling, selection, and device policy. `tensor_interfaces` retains two C++ API checks: frontend linkage without CPURunner/ExecutionEngine, and rejection of malformed in-memory IR that the text parser cannot construct. Both API tests read their programs from the regular data files.
+`compiler_suite` runs all compiler data files. `runner_contracts` checks the runner's error handling, selection, and device policy. `tensor_interfaces` retains two C++ API checks: frontend linkage without CPURunner/ExecutionEngine, and rejection of malformed in-memory IR that the text parser cannot construct. Both API tests read their programs from the regular data files. `metal_runtime_contracts` additionally checks synthetic capacity/launch limits and an empty runtime call without allocating large tensors. It also checks compilation-error propagation when a device is available.
 
 The runner defaults to the project's `test` directory, independent of the working directory. It discovers `.ml` and `.mlir` files recursively in sorted order. Useful selections are:
 
@@ -54,7 +54,7 @@ let ts = [1, 2, 3] in ts * ts + 2 * ts + 1
 
 Every run starts with its own context and newly translated/parsed module. Destructive optimization or lowering in one run cannot affect another.
 
-`version`, `input`, and `runs` are required YAML fields. Each run has only `name` and `pipeline`. Unknown/duplicate YAML fields, duplicate names or assertion kinds, assertions for unknown runs, empty programs, and missing assertions fail validation before execution. Assertion kinds must be supported by their pipeline. Arbitrary shell commands and pass scripts are not supported.
+`version`, `input`, and `runs` are required YAML fields. Each run has `name` and `pipeline`, plus optional positive `threads-per-group` for `tensor-metal` only. Omitting the width selects the runtime default. Unknown/duplicate YAML fields, duplicate names or assertion kinds, assertions for unknown runs, empty programs, and missing assertions fail validation before execution. Assertion kinds must be supported by their pipeline. Arbitrary shell commands and pass scripts are not supported.
 
 ## IR format
 
@@ -92,11 +92,11 @@ An `ir-equal` or `text-equal` block contains the complete expected output, using
 | `metal-compile` | Same export path, then compile MSL and create the entrypoint's pipeline; no dispatch |
 | `tensor-cpu` | Production CPU tensor runner; typed tensor result and lowered LLVM IR |
 | `scalar-cpu` | Scalar source lowering and CPU JIT; typed scalar result |
-| `tensor-metal-legacy` | Existing GPU runner, explicitly distinguished from the new IR/export path; tensor result and MSL |
+| `tensor-metal` | Production GPU runner: frontend, GPU IR extraction, MSL export and synchronous Metal dispatch; tensor result and actual executed MSL |
 
 Legacy `@letalg:opt` and `@runner:cpu` blocks continue to run unchanged. Their implicit `legacy-letalg`/`legacy-cpu` adapters preserve the previous scope/closure pipeline, function representation, exact-text matching, and scalar results. They do not silently add canonicalization. Legacy and version-1 metadata cannot be mixed in one file.
 
-`tensor-metal` is intentionally not registered yet: dispatch through the new kernel IR/exporter belongs to the subsequent runtime integration feature.
+`tensor-metal` replaces the former `tensor-metal-legacy` adapter after runtime integration. Existing tensor execution cases now exercise the new exporter path. For dispatch boundaries see `test/tensor/dispatch`: a width of 4 is configured alongside the program and expected result in each file.
 
 ## Assertions
 
@@ -136,4 +136,4 @@ CI and local CTest use the same runner. `RunnerChecks.cmake` generates temporary
 
 On the installed LLVM 22.1 distribution, ExecutionEngine depends on the monolithic MLIR/LLVM libraries. The unified targets use that linkage consistently to avoid duplicate MLIR interface TypeIDs from mixing component archives with the shared library. LLVM FileCheck remains a separate archive, resolving its support symbols through LLVM.
 
-This feature reorganizes testing only. It does not add language syntax, file imports, dynamic tensor inputs, or a new Metal execution path.
+The test migration preserves compiler semantics. Runtime integration additionally provides `tensor-metal` execution through the GPU IR/exporter path without adding language syntax, file imports, or dynamic tensor inputs.

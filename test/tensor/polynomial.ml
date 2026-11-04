@@ -9,7 +9,7 @@ runs:
   - name: shader
     pipeline: tensor-msl
   - name: metal
-    pipeline: tensor-metal-legacy
+    pipeline: tensor-metal
 *)
 (* @assert:cpu:result
 [4, 9, 16]
@@ -37,6 +37,10 @@ CHECK: llvm.func @tensor_literal
 *)
 (* @assert:metal:text-check
 CHECK: kernel void tensor_map
+CHECK: threadgroup_position_in_grid
+CHECK: threads_per_threadgroup
+CHECK: thread_position_in_threadgroup
+CHECK: const uint v0 = group_id.x;
 *)
 (* @assert:metal:compare
 cpu

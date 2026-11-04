@@ -26,12 +26,17 @@ std::string metalDeviceName() {
   }
 }
 
-void runMetalKernel(const std::string &source, const int32_t *input,
-                    int32_t *output, std::size_t elementCount) {
+void runMetalKernel(const std::string &source, const std::string &entrypoint,
+                    std::span<const int32_t> input, std::span<int32_t> output,
+                    std::size_t elementCount, MetalLaunchOptions options) {
+  // Reject host-side errors before touching Metal, including in CPU-only runs.
+  planMetalLaunch(elementCount, input.size(), output.size(), options);
   if (elementCount == 0)
     return;
-  if (elementCount > std::numeric_limits<uint32_t>::max())
-    throw std::runtime_error("tensor is too large for the Metal kernel");
+  if (!input.data() || !output.data())
+    throw std::runtime_error("Metal nonempty buffers require nonnull pointers");
+  if (entrypoint.empty())
+    throw std::runtime_error("Metal entrypoint must not be empty");
 
   @autoreleasepool {
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -49,9 +54,10 @@ void runMetalKernel(const std::string &source, const int32_t *input,
           "Metal compilation failed: " +
           std::string([error.localizedDescription UTF8String]));
 
-    id<MTLFunction> function = [library newFunctionWithName:@"tensor_map"];
+    NSString *functionName = [NSString stringWithUTF8String:entrypoint.c_str()];
+    id<MTLFunction> function = [library newFunctionWithName:functionName];
     if (function == nil)
-      throw std::runtime_error("Metal kernel tensor_map was not generated");
+      throw std::runtime_error("Metal kernel entrypoint was not generated: " + entrypoint);
 
     id<MTLComputePipelineState> pipeline =
         [device newComputePipelineStateWithFunction:function error:&error];
@@ -60,9 +66,14 @@ void runMetalKernel(const std::string &source, const int32_t *input,
           "Metal pipeline creation failed: " +
           std::string([error.localizedDescription UTF8String]));
 
-    const std::size_t byteCount = elementCount * sizeof(int32_t);
+    const auto maxThreads = std::min<std::size_t>(
+        pipeline.maxTotalThreadsPerThreadgroup,
+        device.maxThreadsPerThreadgroup.width);
+    const auto launch = planMetalLaunch(elementCount, input.size(), output.size(),
+                                       options, maxThreads, device.maxBufferLength);
+    const std::size_t byteCount = launch.byteCount;
     id<MTLBuffer> inputBuffer =
-        [device newBufferWithBytes:input
+        [device newBufferWithBytes:input.data()
                             length:byteCount
                            options:MTLResourceStorageModeShared];
     id<MTLBuffer> outputBuffer =
@@ -74,27 +85,29 @@ void runMetalKernel(const std::string &source, const int32_t *input,
     id<MTLCommandQueue> queue = [device newCommandQueue];
     id<MTLCommandBuffer> command = [queue commandBuffer];
     id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
+    if (queue == nil || command == nil || encoder == nil)
+      throw std::runtime_error("Metal command creation failed");
     [encoder setComputePipelineState:pipeline];
     [encoder setBuffer:inputBuffer offset:0 atIndex:0];
     [encoder setBuffer:outputBuffer offset:0 atIndex:1];
-    uint32_t count = static_cast<uint32_t>(elementCount);
+    uint32_t count = launch.count;
     [encoder setBytes:&count length:sizeof(count) atIndex:2];
 
-    NSUInteger width =
-        std::min<NSUInteger>(pipeline.maxTotalThreadsPerThreadgroup, 256);
-    MTLSize grid = MTLSizeMake(elementCount, 1, 1);
-    MTLSize group = MTLSizeMake(width, 1, 1);
-    [encoder dispatchThreads:grid threadsPerThreadgroup:group];
+    // All groups have the same width, including the padded final group.
+    // This matches group_id.x * group_size.x + local_id.x in exported MSL.
+    MTLSize groups = MTLSizeMake(launch.threadgroupCount, 1, 1);
+    MTLSize group = MTLSizeMake(launch.threadsPerThreadgroup, 1, 1);
+    [encoder dispatchThreadgroups:groups threadsPerThreadgroup:group];
     [encoder endEncoding];
     [command commit];
     [command waitUntilCompleted];
 
-    if (command.status == MTLCommandBufferStatusError)
+    if (command.status != MTLCommandBufferStatusCompleted)
       throw std::runtime_error(
           "Metal execution failed: " +
           std::string([command.error.localizedDescription UTF8String]));
 
-    std::memcpy(output, [outputBuffer contents], byteCount);
+    std::memcpy(output.data(), [outputBuffer contents], byteCount);
   }
 }
 

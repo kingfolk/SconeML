@@ -11,6 +11,7 @@ namespace sconeml::test {
 struct Run {
   std::string name;
   std::string pipeline;
+  std::optional<uint64_t> threadsPerThreadgroup = std::nullopt;
 };
 struct Assertion {
   std::string kind;
