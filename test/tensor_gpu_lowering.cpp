@@ -1,4 +1,5 @@
 #include "src/conversion/LowerTensorToGPU.h"
+#include "src/conversion/MetalExporter.h"
 #include "src/tensor/TensorFrontend.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -53,6 +54,8 @@ mlir::OwningOpRef<mlir::ModuleOp> lower(mlir::ModuleOp source) {
   require(mlir::succeeded(result), "GPU lowering failed");
   auto device = std::move(*result);
   require(mlir::succeeded(mlir::verify(*device)), "invalid GPU output");
+  auto msl = sconeml::exportMetalKernel(*device);
+  require(mlir::succeeded(msl), "lowered map was rejected by the MSL exporter");
   require(equivalent(source, *snapshot), "extraction changed the host IR");
   device->walk([](mlir::Operation *op) {
     require(op->getName().getDialectNamespace() != "letalg",
