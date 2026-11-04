@@ -53,27 +53,18 @@ MLIR index width is target-dependent. This exporter accepts the validated F2 pat
 
 ## Tests
 
-The `SconeMLMetalExporter` library and `metal_exporter` executable are ordinary C++ targets. They do not link a device runtime. The golden [MSL fixture](../test/metal_exporter/shared_square.metal) asserts the complete generated shader, including shared temporaries and guard placement. Additional tests cover integer bit patterns, source immutability, malformed IR, and diagnostic rejection of unsupported signatures, layouts, operations, predicates, dimensions and scalar dependencies.
-
-The existing GPU-lowering test also calls the exporter on its generated kernels, including frontend polynomial, subtraction and identity maps, so the two APIs are checked together.
-
-On Apple, `metal_exporter_compile` is a separate Objective-C++ executable. It reads generated shaders, compiles them on the available Metal device and creates compute pipelines for the returned entrypoint convention. It does not dispatch them. CTest fixtures ensure generation succeeds before compilation runs; no device produces an explicit skip, not a compilation success.
+Exporter cases now run through the [unified data runner](testing.md). The [shared-square case](../test/metal_exporter/shared_square.mlir) contains GPU IR, a complete expected shader, preservation assertions and a device-compilation run in one file. The [integer-bit case](../test/metal_exporter/integer_bits.mlir) similarly checks the complete MSL for negative/extreme constants and all three arithmetic operators.
 
 ```sh
-cmake -S . -B build
-cmake --build build --target metal_exporter tensor_gpu_lowering -j3
-ctest --test-dir build -R '^(metal_exporter|tensor_gpu_lowering)$' --output-on-failure
+cmake --build build --target tester tensor_interfaces -j3
+./build/tester --suite test/metal_exporter --no-metal
+./build/tester --suite test/metal_exporter --run compile --require-metal
 ```
 
-On Apple, additionally run:
+Each negative case contains the actual unsupported IR plus expected stage/op/message. The runner validates before export, applies full golden or FileCheck assertions, and invokes a thin Apple adapter for metal-compile. That adapter compiles the generated source and creates a compute pipeline in memory; it does not maintain its own fixture list or dispatch kernels. No device produces a per-run skip unless strict mode is requested.
 
-```sh
-cmake --build build --target metal_exporter_compile -j3
-ctest --test-dir build -R '^metal_exporter_compile$' --output-on-failure
-```
-
-Generated `.metal` files live in `build/exported-msl/`. The `shared.metal` case tests shared computation; `integer.metal` covers negative/extreme constants and all three arithmetic operators. Both compiled and produced pipelines locally during F3 validation. CI can skip device compilation when no Metal device is available.
+SconeMLMetalExporter is still ordinary C++ with no device API calls. The two remaining C++ interface tests check frontend linkage and rejection of malformed in-memory IR; all program-based exporter tests are data files. Both generated shaders compiled and produced pipelines locally during F3 validation.
 
 ## Execution status
 
-This completes source generation and compilation validation. The public GPU runner still uses its original expression-to-MSL path. Connecting the new exporter, checking dispatch dimensions and using the uniform launch contract belong to F4; successful pipeline creation is not proof of kernel execution or numeric results.
+The public GPU runner still uses its original expression-to-MSL path. Dispatch integration and its uniform-threadgroup/u32 capacity checks remain F4 work. Compilation success is not proof of execution or numeric results.

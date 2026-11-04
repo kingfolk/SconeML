@@ -1,0 +1,110 @@
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/IRMapping.h"
+#include "mlir/IR/OperationSupport.h"
+#include "mlir/Parser/Parser.h"
+#include "test/runner/Pipelines.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/FileCheck/FileCheck.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/SourceMgr.h"
+#include "llvm/Support/raw_ostream.h"
+
+namespace sconeml::test {
+static void fileCheck(const std::string &expected, const std::string &actual,
+                      const std::string &label) {
+  llvm::FileCheckRequest request;
+  request.CheckPrefixes.push_back("CHECK");
+  llvm::FileCheck check(request);
+  llvm::SourceMgr manager;
+  std::string diagnostic;
+  manager.setDiagHandler(
+      [](const llvm::SMDiagnostic &diag, void *context) {
+        llvm::raw_string_ostream stream(*static_cast<std::string *>(context));
+        diag.print("assert", stream);
+      },
+      &diagnostic);
+  llvm::SmallString<1024> checkText, inputText;
+  auto checkBuffer = llvm::MemoryBuffer::getMemBufferCopy(expected);
+  auto inputBuffer = llvm::MemoryBuffer::getMemBufferCopy(actual);
+  unsigned checkId = manager.AddNewSourceBuffer(
+      llvm::MemoryBuffer::getMemBufferCopy(
+          check.CanonicalizeFile(*checkBuffer, checkText), label + ":expected"),
+      llvm::SMLoc());
+  unsigned inputId = manager.AddNewSourceBuffer(
+      llvm::MemoryBuffer::getMemBufferCopy(
+          check.CanonicalizeFile(*inputBuffer, inputText), label + ":actual"),
+      llvm::SMLoc());
+  auto pattern = manager.getMemoryBuffer(checkId)->getBuffer();
+  auto input = manager.getMemoryBuffer(inputId)->getBuffer();
+  require(!check.readCheckFile(manager, pattern),
+          "invalid FileCheck assertion: " + diagnostic);
+  require(check.checkInput(manager, input),
+          diagnostic + "\nActual:\n" + actual);
+}
+
+static bool equivalent(const std::string &expected, const std::string &actual) {
+  auto context = makeContext();
+  auto lhs = mlir::parseSourceString<mlir::ModuleOp>(expected, context.get());
+  auto rhs = mlir::parseSourceString<mlir::ModuleOp>(actual, context.get());
+  require(lhs && rhs,
+          "ir-equal requires valid expected and actual MLIR modules");
+  mlir::IRMapping mapping;
+  return mlir::OperationEquivalence::isEquivalentTo(
+      *lhs, *rhs,
+      [&](mlir::Value a, mlir::Value b) {
+        return mlir::success(mapping.lookupOrNull(a) == b);
+      },
+      [&](mlir::Value a, mlir::Value b) { mapping.map(a, b); },
+      mlir::OperationEquivalence::IgnoreLocations);
+}
+
+void checkAssertions(const TestCase &test, const Run &run, const Output &output,
+                     const std::map<std::string, Output> &previous) {
+  for (const auto &assertion : test.assertions.at(run.name)) {
+    if (assertion.kind == "error") {
+      auto error = parseError(assertion.value);
+      require(!output.success && output.stage == error.stage &&
+                  output.diagnostic.find(error.message) != std::string::npos &&
+                  (error.op.empty() ||
+                   output.diagnostic.find(error.op) != std::string::npos),
+              "expected error at " + error.stage + " (" + error.op +
+                  "): " + error.message + "\nActual stage: " + output.stage +
+                  "\n" + output.diagnostic);
+      continue;
+    }
+    require(output.success,
+            "pipeline failed at " + output.stage + ": " + output.diagnostic);
+    if (assertion.kind == "success")
+      continue;
+    if (assertion.kind == "result") {
+      auto expected = parseNumber(assertion.value);
+      require(output.number && *output.number == expected,
+              "expected " + formatNumber(expected) + ", actual " +
+                  (output.number ? formatNumber(*output.number)
+                                 : "no numeric result"));
+    } else if (assertion.kind == "compare") {
+      const auto &other = previous.at(assertion.value);
+      require(other.success && other.number && output.number &&
+                  *other.number == *output.number,
+              "numeric result differs from run " + assertion.value);
+    } else if (assertion.kind == "source-unchanged") {
+      require(output.sourceUnchanged.value_or(false),
+              "input IR changed or pipeline has no preservation contract");
+    } else if (assertion.kind == "ir-equal") {
+      require(equivalent(assertion.value, output.ir),
+              "IR structures differ\nExpected:\n" + assertion.value +
+                  "\nActual:\n" + output.ir);
+    } else if (assertion.kind == "ir-check" || assertion.kind == "text-check") {
+      fileCheck(assertion.value,
+                assertion.kind == "ir-check" ? output.ir : output.text,
+                test.path + ":" + run.name);
+    } else {
+      const auto &actual = assertion.kind == "effects"      ? output.effects
+                           : assertion.kind == "entrypoint" ? output.entrypoint
+                                                            : output.text;
+      require(trim(actual) == trim(assertion.value),
+              "expected:\n" + assertion.value + "\nactual:\n" + actual);
+    }
+  }
+}
+} // namespace sconeml::test

@@ -33,9 +33,10 @@ multiplication. Captures, memory effects inside the body, and other scalar
 operations are rejected. The map itself declares an input read and an output
 write, so it is not treated as a pure operation by optimization passes.
 
-Run the verifier, memory-effect, shared-frontend, and SCF lowering tests without
-a GPU with `cmake --build build --target tensor_semantics` followed by
-`ctest --test-dir build -R '^tensor_semantics$' --output-on-failure`.
+The [unified test runner](docs/testing.md) reads programs, pipeline configuration,
+and assertions from the same `.ml` or `.mlir` file. Run compiler tests without a
+GPU with `cmake --build build --target tester tensor_interfaces` followed by
+`./build/tester --no-metal`.
 
 An independent [GPU kernel extraction](docs/gpu-kernel-lowering.md) API converts
 a verified tensor map into `gpu.module` / `gpu.func` with explicit buffer/count
@@ -60,8 +61,8 @@ cmake -S . -B build \
   -DLLVM_DIR="$(brew --prefix llvm@22)/lib/cmake/llvm" \
   -DMLIR_DIR="$(brew --prefix llvm@22)/lib/cmake/mlir" \
   -DCMAKE_CXX_COMPILER="$(brew --prefix llvm@22)/bin/clang++"
-cmake --build build --target tensor_targets -j4
-./build/tensor_targets --cpu-only
+cmake --build build --target tester tensor_interfaces -j3
+./build/tester --suite test/tensor --run cpu
 ```
 
 The tests compare the CPU result against expected values for several tensor
@@ -75,7 +76,10 @@ compares every result element against both the expected tensor and the CPU JIT:
 letalg.tensor_map -> Metal Shading Language -> native Apple GPU
 ```
 
-Run the cross-target test on a Metal-capable machine with `./build/tensor_targets`.
+Run cross-target cases with
+`./build/tester --suite test/tensor --require-metal` on a Metal-capable machine.
+The explicitly named `tensor-metal-legacy` test pipeline exercises the existing
+GPU runner; `tensor-msl` and `metal-compile` test the new exporter separately.
 The GPU runner currently accepts a top-level tensor literal expression with one
 tensor map; it extracts the literal values from the translated IR. Other
 platforms keep the CPU test active and use a GPU runtime stub until a CUDA,

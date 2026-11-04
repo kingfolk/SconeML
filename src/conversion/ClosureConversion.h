@@ -1,6 +1,8 @@
 #ifndef SCONEML_CLOSURE_CONVERSION_H
 #define SCONEML_CLOSURE_CONVERSION_H
 
+#include "src/dialect/LetAlgDialect.h"
+
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Operation.h"
@@ -88,7 +90,7 @@ struct ClosureConversionPass : public mlir::PassWrapper<ClosureConversionPass, m
   }
 };
 
-std::unique_ptr<mlir::Pass> createClosureConversionPass() { return std::make_unique<ClosureConversionPass>(); }
+inline std::unique_ptr<mlir::Pass> createClosureConversionPass() { return std::make_unique<ClosureConversionPass>(); }
 }
 
 #endif // SCONEML_CLOSURE_CONVERSION_H

@@ -1,10 +1,21 @@
-// Expected device-only extraction. No host literal/alloc/store is required.
+// @test
+// version: 1
+// input: mlir
+// runs:
+//   - name: export
+//     pipeline: tensor-msl
+// @end
+// @assert:export:error
+// stage: msl-export
+// op: gpu.func
+// message: x-dimensional
+// @end
 module {
   gpu.module @kernels {
     gpu.func @tensor_map(%input: memref<?xi32, #gpu.address_space<global>>,
                          %output: memref<?xi32, #gpu.address_space<global>>,
                          %count: i32) kernel {
-      %block = gpu.block_id x
+      %block = gpu.block_id y
       %width = gpu.block_dim x
       %thread = gpu.thread_id x
       %base = arith.muli %block, %width : index

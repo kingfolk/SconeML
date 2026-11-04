@@ -13,7 +13,7 @@
 
 namespace sconeml {
 
-void moveOperationsToFunc(mlir::Operation *sourceOp, mlir::func::FuncOp targetFunc, 
+inline void moveOperationsToFunc(mlir::Operation *sourceOp, mlir::func::FuncOp targetFunc,
 mlir::ConversionPatternRewriter &rewriter, mlir::IRMapping& valueMapping) {
   auto& sourceRegion = sourceOp->getRegion(0);
   auto& sourceBlock = sourceRegion.front();
@@ -133,7 +133,7 @@ struct LowerToLLVMLoweringPass
   }
 };
 
-std::unique_ptr<mlir::Pass> createLowerToLLVMPass() {
+inline std::unique_ptr<mlir::Pass> createLowerToLLVMPass() {
   return std::make_unique<LowerToLLVMLoweringPass>();
 }
 

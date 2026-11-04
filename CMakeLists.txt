@@ -98,17 +98,7 @@ get_property(extension_libs GLOBAL PROPERTY MLIR_EXTENSION_LIBS)
 
 target_link_libraries(tester
   PRIVATE
-  ${dialect_libs}
-  ${extension_libs}
-  ${conversion_libs}
-  ${translation_libs}
-  MLIRDialect
-  MLIRIR
-  MLIRParser
-  MLIRSupport
-  MLIRTransforms
-  MLIRTransformUtils
-  MLIRAnalysis
+  MLIR
   MLIRExecutionEngine
 )
 
@@ -127,127 +117,63 @@ if(APPLE)
 else()
   set(SCONEML_GPU_RUNTIME src/tensor/MetalRuntimeStub.cpp)
 endif()
-add_llvm_executable(tensor_targets
-  test/tensor_targets.cpp
+# Pipeline libraries are also consumed by the unified test runner.
+add_library(SconeMLTensorGPU STATIC src/conversion/LowerTensorToGPU.cpp)
+add_dependencies(SconeMLTensorGPU LetAlgDialectIncGen)
+target_link_libraries(SconeMLTensorGPU PUBLIC
+  MLIR)
+
+add_library(SconeMLMetalExporter STATIC src/conversion/MetalExporter.cpp)
+target_link_libraries(SconeMLMetalExporter PUBLIC
+  MLIR)
+
+add_library(SconeMLTestSpec STATIC test/runner/TestSpec.cpp)
+target_compile_options(SconeMLTestSpec PRIVATE -fexceptions)
+target_link_libraries(SconeMLTestSpec PUBLIC LLVM)
+
+if(APPLE)
+  set(SCONEML_TEST_METAL test/runner/MetalAdapter.mm)
+  set_source_files_properties(test/runner/MetalAdapter.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+else()
+  set(SCONEML_TEST_METAL test/runner/MetalAdapterStub.cpp)
+endif()
+target_sources(tester PRIVATE
+  test/runner/Pipelines.cpp
+  test/runner/Assertions.cpp
   src/tensor/TensorFrontend.cpp
   src/tensor/CPURunner.cpp
   src/tensor/GPURunner.cpp
   ${SCONEML_GPU_RUNTIME}
-  src/dialect/LetAlgDialect.cpp
-)
-
-target_compile_options(tensor_targets PRIVATE -fexceptions)
-add_dependencies(tensor_targets LetAlgDialectIncGen)
-
-target_link_libraries(tensor_targets
-  PRIVATE
-  ${dialect_libs}
-  ${extension_libs}
-  ${conversion_libs}
-  ${translation_libs}
-  MLIRDialect
-  MLIRIR
-  MLIRSupport
-  MLIRTransforms
-  MLIRTransformUtils
-  MLIRExecutionEngine
-)
-
+  ${SCONEML_TEST_METAL})
+target_compile_definitions(tester PRIVATE SCONEML_TEST_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/test")
+target_link_libraries(tester PRIVATE
+  SconeMLTestSpec SconeMLTensorGPU SconeMLMetalExporter $<TARGET_FILE:LLVMFileCheck>)
+# ExecutionEngine uses the monolithic MLIR/LLVM libraries in this distribution.
+# Avoid mixing component archives (and duplicate interface TypeIDs) with MLIR.
+# FileCheck itself is a separate archive; its Support symbols come from LLVM.
+add_dependencies(tester LLVMFileCheck)
 if(APPLE)
-  target_link_libraries(tensor_targets PRIVATE "-framework Foundation" "-framework Metal")
+  target_link_libraries(tester PRIVATE "-framework Foundation" "-framework Metal")
 endif()
 
-target_include_directories(tensor_targets
-  PRIVATE
-  ${CMAKE_CURRENT_BINARY_DIR}
-  ${CMAKE_CURRENT_SOURCE_DIR}
-  ${MLIR_INCLUDE_DIRS}
-  ${LLVM_INCLUDE_DIRS}
-)
+# Keep only interface-level contracts that cannot be expressed as program data.
+# This target intentionally does not link CPU runner/ExecutionEngine.
+add_llvm_executable(tensor_interfaces
+  test/runner/Interfaces.cpp
+  src/tensor/TensorFrontend.cpp
+  src/dialect/LetAlgDialect.cpp)
+target_compile_options(tensor_interfaces PRIVATE -fexceptions)
+add_dependencies(tensor_interfaces LetAlgDialectIncGen)
+target_link_libraries(tensor_interfaces PRIVATE
+  SconeMLTestSpec SconeMLTensorGPU SconeMLMetalExporter MLIR)
 
 enable_testing()
-
-add_library(SconeMLTensorGPU STATIC src/conversion/LowerTensorToGPU.cpp)
-add_dependencies(SconeMLTensorGPU LetAlgDialectIncGen)
-target_link_libraries(SconeMLTensorGPU PUBLIC
-  MLIRArithDialect
-  MLIRGPUDialect
-  MLIRMemRefDialect
-  MLIRSCFDialect
-  MLIRIR
-  MLIRSupport
-)
-
-add_llvm_executable(tensor_gpu_lowering
-  test/tensor_gpu_lowering.cpp
-  src/tensor/TensorFrontend.cpp
-  src/dialect/LetAlgDialect.cpp
-)
-target_compile_options(tensor_gpu_lowering PRIVATE -fexceptions)
-add_dependencies(tensor_gpu_lowering LetAlgDialectIncGen)
-target_link_libraries(tensor_gpu_lowering PRIVATE
-  SconeMLTensorGPU SconeMLMetalExporter MLIRFuncDialect MLIRParser
-)
-add_test(NAME tensor_gpu_lowering COMMAND tensor_gpu_lowering
-  ${CMAKE_CURRENT_SOURCE_DIR}/test/kernel_lowering/shared_square.mlir
-  ${CMAKE_CURRENT_SOURCE_DIR}/test/kernel_lowering/shared_square_gpu.mlir)
-
-# MSL generation is ordinary C++; device compilation is a separate Apple test.
-add_library(SconeMLMetalExporter STATIC src/conversion/MetalExporter.cpp)
-target_link_libraries(SconeMLMetalExporter PUBLIC
-  MLIRArithDialect MLIRGPUDialect MLIRMemRefDialect MLIRSCFDialect MLIRIR MLIRSupport
-)
-add_llvm_executable(metal_exporter test/metal_exporter.cpp)
-target_compile_options(metal_exporter PRIVATE -fexceptions)
-target_link_libraries(metal_exporter PRIVATE SconeMLMetalExporter MLIRParser)
-set(SCONEML_EXPORTED_MSL_DIR ${CMAKE_CURRENT_BINARY_DIR}/exported-msl)
-add_test(NAME metal_exporter COMMAND metal_exporter
-  ${CMAKE_CURRENT_SOURCE_DIR}/test/kernel_lowering/shared_square_gpu.mlir
-  ${CMAKE_CURRENT_SOURCE_DIR}/test/metal_exporter/shared_square.metal
-  ${CMAKE_CURRENT_SOURCE_DIR}/test/metal_exporter/integer_bits.mlir
-  ${SCONEML_EXPORTED_MSL_DIR})
-set_tests_properties(metal_exporter PROPERTIES FIXTURES_SETUP exported_msl)
-if(APPLE)
-  add_llvm_executable(metal_exporter_compile test/metal_exporter_compile.mm)
-  target_compile_options(metal_exporter_compile PRIVATE -fobjc-arc)
-  target_link_libraries(metal_exporter_compile PRIVATE
-    "-framework Foundation" "-framework Metal")
-  add_test(NAME metal_exporter_compile COMMAND metal_exporter_compile
-    ${SCONEML_EXPORTED_MSL_DIR}/shared.metal
-    ${SCONEML_EXPORTED_MSL_DIR}/integer.metal)
-  set_tests_properties(metal_exporter_compile PROPERTIES
-    FIXTURES_REQUIRED exported_msl SKIP_RETURN_CODE 77)
-endif()
-
-add_llvm_executable(tensor_semantics
-  test/tensor_semantics.cpp
-  src/tensor/TensorFrontend.cpp
-  src/dialect/LetAlgDialect.cpp
-)
-target_compile_options(tensor_semantics PRIVATE -fexceptions)
-add_dependencies(tensor_semantics LetAlgDialectIncGen)
-target_link_libraries(tensor_semantics PRIVATE
-  MLIRArithDialect
-  MLIRFuncDialect
-  MLIRMemRefDialect
-  MLIRSCFDialect
-  MLIRParser
-  MLIRPass
-  MLIRTransforms
-  MLIRTransformUtils
-  MLIRIR
-  MLIRSupport
-)
-add_test(NAME tensor_semantics COMMAND tensor_semantics)
-
-add_test(NAME tensor_ir COMMAND tester --file tensor_literal.ml)
-set_tests_properties(tensor_ir PROPERTIES
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME runner_cpu COMMAND tester --file let.ml)
-set_tests_properties(runner_cpu PROPERTIES
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME tensor_cpu COMMAND tensor_targets --cpu-only)
-if(APPLE)
-  add_test(NAME tensor_cross_target COMMAND tensor_targets)
-  set_tests_properties(tensor_cross_target PROPERTIES SKIP_RETURN_CODE 77)
-endif()
+add_test(NAME compiler_suite COMMAND tester)
+add_test(NAME tensor_interfaces COMMAND tensor_interfaces
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/tensor/polynomial.ml
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/metal_exporter/shared_square.mlir)
+add_test(NAME runner_contracts COMMAND ${CMAKE_COMMAND}
+  -DRUNNER=$<TARGET_FILE:tester>
+  -DDATA_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/test
+  -DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/runner-contracts
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/test/runner/RunnerChecks.cmake)
