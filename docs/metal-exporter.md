@@ -56,7 +56,7 @@ MLIR index width is target-dependent. This exporter accepts the validated F2 pat
 Exporter cases now run through the [unified data runner](testing.md). The [shared-square case](../test/metal_exporter/shared_square.mlir) contains GPU IR, a complete expected shader, preservation assertions and a device-compilation run in one file. The [integer-bit case](../test/metal_exporter/integer_bits.mlir) similarly checks the complete MSL for negative/extreme constants and all three arithmetic operators.
 
 ```sh
-cmake --build build --target tester tensor_interfaces metal_runtime_checks -j3
+cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks -j3
 ./build/tester --suite test/metal_exporter --no-metal
 ./build/tester --suite test/metal_exporter --run compile --require-metal
 ```

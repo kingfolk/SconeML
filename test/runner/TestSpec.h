@@ -21,6 +21,8 @@ struct TestCase {
   std::string path;
   std::string input;
   std::string program;
+  // Test-only host values for a raw rank-1 map fixture; not source parameters.
+  std::optional<std::vector<int32_t>> tensorInput;
   std::vector<Run> runs;
   std::map<std::string, std::vector<Assertion>> assertions;
 };

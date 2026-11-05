@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(MLIRSconemlProject)
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 if(APPLE)
   enable_language(OBJCXX)
@@ -139,6 +140,7 @@ else()
 endif()
 target_sources(tester PRIVATE
   test/runner/Pipelines.cpp
+  test/runner/MapExecution.cpp
   test/runner/Assertions.cpp
   src/tensor/TensorFrontend.cpp
   src/tensor/CPURunner.cpp
@@ -177,12 +179,22 @@ if(APPLE)
   target_link_libraries(metal_runtime_checks PRIVATE "-framework Foundation" "-framework Metal")
 endif()
 
+add_executable(metal_stub_checks
+  test/runner/MetalRuntimeChecks.cpp
+  src/tensor/MetalLaunch.cpp
+  src/tensor/MetalRuntimeStub.cpp)
+target_compile_options(metal_stub_checks PRIVATE -fexceptions)
+target_compile_definitions(metal_stub_checks PRIVATE SCONEML_EXPECT_METAL_STUB)
+
 enable_testing()
 add_test(NAME compiler_suite COMMAND tester)
 add_test(NAME tensor_interfaces COMMAND tensor_interfaces
   ${CMAKE_CURRENT_SOURCE_DIR}/test/tensor/polynomial.ml
   ${CMAKE_CURRENT_SOURCE_DIR}/test/metal_exporter/shared_square.mlir)
 add_test(NAME metal_runtime_contracts COMMAND metal_runtime_checks)
+add_test(NAME metal_stub_contracts COMMAND metal_stub_checks)
+add_test(NAME reference_fixtures COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate.py --check)
 add_test(NAME runner_contracts COMMAND ${CMAKE_COMMAND}
   -DRUNNER=$<TARGET_FILE:tester>
   -DDATA_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/test

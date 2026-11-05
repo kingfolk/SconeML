@@ -35,7 +35,7 @@ write, so it is not treated as a pure operation by optimization passes.
 
 The [unified test runner](docs/testing.md) reads programs, pipeline configuration,
 and assertions from the same `.ml` or `.mlir` file. Run compiler tests without a
-GPU with `cmake --build build --target tester tensor_interfaces metal_runtime_checks` followed by
+GPU with `cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks` followed by
 `./build/tester --no-metal`.
 
 An independent [GPU kernel extraction](docs/gpu-kernel-lowering.md) API converts
@@ -60,7 +60,7 @@ cmake -S . -B build \
   -DLLVM_DIR="$(brew --prefix llvm@22)/lib/cmake/llvm" \
   -DMLIR_DIR="$(brew --prefix llvm@22)/lib/cmake/mlir" \
   -DCMAKE_CXX_COMPILER="$(brew --prefix llvm@22)/bin/clang++"
-cmake --build build --target tester tensor_interfaces metal_runtime_checks -j3
+cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks -j3
 ./build/tester --suite test/tensor --run cpu
 ```
 
@@ -84,6 +84,11 @@ tensor map; it extracts the literal values from the translated IR. Other
 platforms keep the CPU test active and use a GPU runtime stub until a CUDA,
 ROCm, or SPIR-V backend is added. Multidimensional tensors and reductions are
 future work.
+
+The [M1 acceptance matrix](docs/m1-acceptance.md) adds an independent 32-bit
+reference, reproducible source/IR fixtures and real CPU/Metal result checks.
+Python 3 is required for the read-only fixture consistency check in CTest.
+The IR execution adapters are test-only; the source API still accepts literals.
 
 ## ML in MLIR dialect
 

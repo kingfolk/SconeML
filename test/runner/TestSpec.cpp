@@ -17,6 +17,7 @@ struct Config {
   int version = 0;
   std::string input;
   std::vector<Run> runs;
+  std::optional<std::vector<int64_t>> tensorInput;
 };
 } // namespace sconeml::test
 
@@ -34,6 +35,7 @@ template <> struct MappingTraits<sconeml::test::Config> {
     io.mapRequired("version", config.version);
     io.mapRequired("input", config.input);
     io.mapRequired("runs", config.runs);
+    io.mapOptional("tensor-input", config.tensorInput);
   }
 };
 template <> struct MappingTraits<sconeml::test::ExpectedError> {
@@ -75,18 +77,20 @@ bool knownPipeline(const std::string &name) {
       "verify",         "letalg",        "letalg-opt",          "tensor-scf",
       "tensor-effects", "tensor-gpu-ir", "tensor-msl",          "metal-compile",
       "tensor-cpu",     "scalar-cpu",    "tensor-metal",        "legacy-letalg",
-      "legacy-cpu"};
+      "legacy-cpu", "tensor-cpu-ir", "tensor-metal-ir"};
   return names.contains(name);
 }
 
 static bool numericPipeline(const std::string &pipeline) {
   return pipeline == "tensor-cpu" || pipeline == "scalar-cpu" ||
-         pipeline == "legacy-cpu" || pipeline == "tensor-metal";
+         pipeline == "legacy-cpu" || pipeline == "tensor-metal" ||
+         pipeline == "tensor-cpu-ir" || pipeline == "tensor-metal-ir";
 }
 
 static bool supports(const std::string &pipeline, const std::string &kind) {
   if (kind == "entrypoint")
-    return pipeline == "tensor-msl" || pipeline == "metal-compile";
+    return pipeline == "tensor-msl" || pipeline == "metal-compile" ||
+           pipeline == "tensor-metal-ir";
   if (kind == "success" || kind == "error")
     return true;
   if (kind == "result" || kind == "compare")
@@ -95,15 +99,17 @@ static bool supports(const std::string &pipeline, const std::string &kind) {
     return pipeline == "tensor-effects";
   if (kind == "source-unchanged")
     return pipeline == "tensor-gpu-ir" || pipeline == "tensor-msl" ||
-           pipeline == "metal-compile";
+           pipeline == "metal-compile" || pipeline == "tensor-metal-ir";
   if (kind == "ir-check" || kind == "ir-equal")
     return pipeline == "letalg" || pipeline == "letalg-opt" ||
            pipeline == "legacy-letalg" || pipeline == "tensor-scf" ||
            pipeline == "tensor-gpu-ir" || pipeline == "tensor-msl" ||
-           pipeline == "metal-compile" || pipeline == "tensor-cpu";
+           pipeline == "metal-compile" || pipeline == "tensor-cpu" ||
+           pipeline == "tensor-cpu-ir" || pipeline == "tensor-metal-ir";
   return pipeline == "letalg" || pipeline == "letalg-opt" ||
          pipeline == "legacy-letalg" || pipeline == "tensor-msl" ||
-         pipeline == "metal-compile" || pipeline == "tensor-metal";
+         pipeline == "metal-compile" || pipeline == "tensor-metal" ||
+         pipeline == "tensor-metal-ir";
 }
 
 ExpectedError parseError(const std::string &text) {
@@ -248,6 +254,16 @@ TestCase parseCase(const std::string &path, const std::string &text) {
             "input must match the .ml/.mlir file kind");
     test.input = config->input;
     test.runs = config->runs;
+    if (config->tensorInput) {
+      require(ir, "tensor-input requires mlir input");
+      test.tensorInput.emplace();
+      for (int64_t value : *config->tensorInput) {
+        require(value >= std::numeric_limits<int32_t>::min() &&
+                    value <= std::numeric_limits<int32_t>::max(),
+                "tensor-input value outside i32 range");
+        test.tensorInput->push_back(static_cast<int32_t>(value));
+      }
+    }
   } else {
     require(legacy && !ir, "missing @test configuration or legacy assertions");
     test.input = "source";
@@ -255,12 +271,21 @@ TestCase parseCase(const std::string &path, const std::string &text) {
   require(!test.runs.empty(), "empty run list");
   std::set<std::string> names;
   std::map<std::string, std::string> preceding;
+  bool consumesInput = false;
   for (const auto &run : test.runs) {
     require(!run.name.empty() && names.insert(run.name).second,
             "empty or duplicate run name: " + run.name);
     require(knownPipeline(run.pipeline), "unknown pipeline: " + run.pipeline);
-    require(!run.threadsPerThreadgroup || run.pipeline == "tensor-metal",
-            "threads-per-group is only supported by tensor-metal");
+    const bool mapIR = run.pipeline == "tensor-cpu-ir" ||
+                       run.pipeline == "tensor-metal-ir";
+    if (mapIR) {
+      require(ir && test.tensorInput.has_value(),
+              "IR execution requires mlir input and tensor-input");
+      consumesInput = true;
+    }
+    require(!run.threadsPerThreadgroup || run.pipeline == "tensor-metal" ||
+                run.pipeline == "tensor-metal-ir",
+            "threads-per-group is only supported by tensor-metal pipelines");
     require(!run.threadsPerThreadgroup || *run.threadsPerThreadgroup > 0,
             "threads-per-group must be positive");
     require(!run.threadsPerThreadgroup ||
@@ -301,6 +326,8 @@ TestCase parseCase(const std::string &path, const std::string &text) {
             "error cannot be combined with success assertions");
     preceding.emplace(run.name, run.pipeline);
   }
+  require(!test.tensorInput || consumesInput,
+          "tensor-input requires an IR execution run");
   for (const auto &[name, assertions] : test.assertions)
     require(names.contains(name), "assertion refers to unknown run: " + name);
   return test;

@@ -125,4 +125,44 @@ file(WRITE "${SCRATCH}/negative-width.ml" "${changed}")
 expect_failure(negative-width "invalid YAML" --file "${SCRATCH}/negative-width.ml")
 expect_failure(strict-execute-device "required device unavailable" --no-metal --require-metal
   --file "${DATA_ROOT}/tensor/polynomial.ml" --run metal)
-message(STATUS "Runner configuration, assertion, selection and launch-option contracts passed")
+
+# Raw IR execution has explicit host data and a deliberately small wrapper ABI.
+file(READ "${DATA_ROOT}/acceptance/ir/001-add.mlir" map_case)
+string(REPLACE "// tensor-input: [2147483647]\n" "" changed "${map_case}")
+file(WRITE "${SCRATCH}/missing-input.mlir" "${changed}")
+expect_failure(missing-input "requires mlir input and tensor-input" --file "${SCRATCH}/missing-input.mlir")
+string(REPLACE "// tensor-input: [2147483647]" "// tensor-input: []" changed "${map_case}")
+file(WRITE "${SCRATCH}/wrong-input-length.mlir" "${changed}")
+expect_failure(wrong-input-length "length must match" --file "${SCRATCH}/wrong-input-length.mlir" --run cpu)
+string(REPLACE "// tensor-input: [2147483647]" "// tensor-input: [2147483648]" changed "${map_case}")
+file(WRITE "${SCRATCH}/wide-input.mlir" "${changed}")
+expect_failure(wide-input "outside i32 range" --file "${SCRATCH}/wide-input.mlir")
+string(REPLACE "memref<1xi32>" "memref<?xi32>" changed "${map_case}")
+file(WRITE "${SCRATCH}/dynamic-wrapper.mlir" "${changed}")
+expect_failure(dynamic-wrapper "static identity-layout host buffer arguments" --file "${SCRATCH}/dynamic-wrapper.mlir" --run cpu)
+string(REPLACE "// @assert:cpu:result\n// [-2147483648]" "// @assert:cpu:result\n// [0]" changed "${map_case}")
+file(WRITE "${SCRATCH}/wrong-ir-result.mlir" "${changed}")
+expect_failure(wrong-ir-result "first differing element [0]" --file "${SCRATCH}/wrong-ir-result.mlir" --run cpu)
+string(REPLACE "input: source" "input: source\ntensor-input: [1]" changed "${valid}")
+file(WRITE "${SCRATCH}/source-host-input.ml" "${changed}")
+expect_failure(source-host-input "tensor-input requires mlir input" --file "${SCRATCH}/source-host-input.ml")
+expect_success(selected-ir-compare "[cpu]" --file "${DATA_ROOT}/acceptance/ir/001-add.mlir" --run metal --no-metal)
+expect_failure(strict-ir-device "required device unavailable" --file "${DATA_ROOT}/acceptance/ir/001-add.mlir" --run metal --no-metal --require-metal)
+string(REPLACE "    func.return" "    %noise = arith.constant 1 : i32\n    func.return" changed "${map_case}")
+file(WRITE "${SCRATCH}/extra-wrapper-op.mlir" "${changed}")
+expect_failure(extra-wrapper-op "only a tensor_map followed by func.return" --file "${SCRATCH}/extra-wrapper-op.mlir" --run cpu)
+file(WRITE "${SCRATCH}/unused-host-input.mlir" [=[// @test
+// version: 1
+// input: mlir
+// tensor-input: [1]
+// runs:
+//   - name: check
+//     pipeline: verify
+// @end
+// @assert:check:success
+// true
+// @end
+module {}
+]=])
+expect_failure(unused-host-input "tensor-input requires an IR execution run" --file "${SCRATCH}/unused-host-input.mlir")
+message(STATUS "Runner configuration, assertion, selection, launch and IR-input contracts passed")
