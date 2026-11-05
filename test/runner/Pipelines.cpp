@@ -83,6 +83,32 @@ Output execute(const TestCase &test, const Run &run, bool disableMetal) {
         return mlir::success();
       });
   try {
+    if (run.pipeline == "tensor-input-ir" || run.pipeline == "tensor-input-cpu") {
+      output.stage = "frontend";
+      std::vector<sconeml::tensor::TensorArgumentSpec> specs;
+      std::vector<sconeml::tensor::TensorArgument> arguments;
+      for (const auto &argument : *run.arguments) {
+        specs.push_back({argument.name, argument.values.size()});
+        arguments.push_back({argument.name, argument.values});
+      }
+      auto module = mlir::ModuleOp::create(mlir::UnknownLoc::get(context.get()));
+      mlir::OwningOpRef<mlir::ModuleOp> owner(module);
+      sconeml::tensor::translateTensorExpression(module, test.program, specs);
+      if (run.pipeline == "tensor-input-ir") {
+        output.ir = output.text = print(module);
+      } else {
+        // Exercise the public source API, not the raw-IR test adapter.
+        const auto before = *run.arguments;
+        output.stage = "cpu-execute";
+        output.number = Number{true, sconeml::tensor::runTensorCPU(
+                                         test.program, arguments, &output.ir)};
+        for (size_t i = 0; i < before.size(); ++i)
+          require(before[i].values == run.arguments->at(i).values,
+                  "CPU runner modified a caller input");
+      }
+      output.success = true;
+      return output;
+    }
     if (run.pipeline == "tensor-cpu" || run.pipeline == "tensor-metal") {
       require(test.input == "source",
               "execution pipeline requires source input");

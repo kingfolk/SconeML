@@ -5,6 +5,10 @@
 #include <string>
 #include <unordered_set>
 #include <functional>
+#include <charconv>
+#include <cstdint>
+#include <cctype>
+#include <string_view>
 #include <memory>
 #include "Ast.h"
 
@@ -197,6 +201,74 @@ std::unique_ptr<ExprNode> parse(std::string& input) {
   printf("%s\n", node->dump().c_str());
   
   return node;
+}
+
+inline bool isTensorExpressionIdentifier(std::string_view name) {
+  auto letter = [](char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+  };
+  if (name.empty() || !letter(name.front()))
+    return false;
+  for (char c : name)
+    if (!letter(c) && !(c >= '0' && c <= '9'))
+      return false;
+  constexpr std::string_view reserved[] = {
+      "let", "in", "if", "then", "else", "fun", "rec", "match", "with",
+      "type", "module", "open", "true", "false", "print", "and", "or"};
+  for (auto word : reserved)
+    if (name == word)
+      return false;
+  return true;
+}
+
+// Validate the deliberately small parameterized-expression grammar before
+// entering the legacy parser, whose general ML stack indexing is unchecked.
+// Reuses that parser/AST and precedence; no second expression compiler exists.
+inline std::unique_ptr<ExprNode> parseTensorExpression(std::string_view source) {
+  std::string normalized;
+  bool operand = true;
+  size_t position = 0;
+  while (position < source.size()) {
+    const auto c = static_cast<unsigned char>(source[position]);
+    if (std::isspace(c)) {
+      ++position;
+      continue;
+    }
+    const size_t start = position;
+    if (operand) {
+      if (c >= '0' && c <= '9') {
+        while (position < source.size() && source[position] >= '0' &&
+               source[position] <= '9')
+          ++position;
+        int32_t value;
+        auto parsed = std::from_chars(source.data() + start,
+                                       source.data() + position, value);
+        if (parsed.ec != std::errc{})
+          throw std::invalid_argument("tensor expression constant outside i32 range");
+      } else {
+        while (position < source.size()) {
+          char ch = source[position];
+          if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                (ch >= '0' && ch <= '9') || ch == '_'))
+            break;
+          ++position;
+        }
+        if (!isTensorExpressionIdentifier(source.substr(start, position - start)))
+          throw std::invalid_argument(
+              "tensor expression expected an identifier or nonnegative i32 constant");
+      }
+    } else {
+      if (c != '+' && c != '-' && c != '*')
+        throw std::invalid_argument("tensor expression expected +, - or *");
+      ++position;
+    }
+    normalized.append(source.substr(start, position - start));
+    normalized += ' ';
+    operand = !operand;
+  }
+  if (normalized.empty() || operand)
+    throw std::invalid_argument("tensor expression is empty or missing an operand");
+  return parse(normalized);
 }
 }
 

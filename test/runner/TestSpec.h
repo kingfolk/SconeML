@@ -8,10 +8,15 @@
 #include <vector>
 
 namespace sconeml::test {
+struct InputArgument {
+  std::string name;
+  std::vector<int32_t> values;
+};
 struct Run {
   std::string name;
   std::string pipeline;
   std::optional<uint64_t> threadsPerThreadgroup = std::nullopt;
+  std::optional<std::vector<InputArgument>> arguments = std::nullopt;
 };
 struct Assertion {
   std::string kind;

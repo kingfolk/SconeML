@@ -57,10 +57,7 @@ void lowerToLLVM(mlir::ModuleOp module) {
     throw std::runtime_error("lowered tensor LLVM module failed verification");
 }
 
-} // namespace
-
-std::vector<int32_t> runTensorLiteralCPU(const std::string &source,
-                                         std::string *loweredLLVMIR) {
+std::unique_ptr<mlir::MLIRContext> makeCPUContext() {
   static const bool initialized = [] {
     llvm::InitializeNativeTarget();
     llvm::InitializeNativeTargetAsmPrinter();
@@ -70,32 +67,45 @@ std::vector<int32_t> runTensorLiteralCPU(const std::string &source,
 
   mlir::DialectRegistry registry;
   mlir::registerAllToLLVMIRTranslations(registry);
-  mlir::MLIRContext context(registry);
-  context.getOrLoadDialect<sconeml::letalg::LetAlgDialect>();
-  context.getOrLoadDialect<mlir::arith::ArithDialect>();
-  context.getOrLoadDialect<mlir::cf::ControlFlowDialect>();
-  context.getOrLoadDialect<mlir::func::FuncDialect>();
-  context.getOrLoadDialect<mlir::LLVM::LLVMDialect>();
-  context.getOrLoadDialect<mlir::memref::MemRefDialect>();
-  context.getOrLoadDialect<mlir::scf::SCFDialect>();
+  auto context = std::make_unique<mlir::MLIRContext>(registry);
+  context->getOrLoadDialect<sconeml::letalg::LetAlgDialect>();
+  context->getOrLoadDialect<mlir::arith::ArithDialect>();
+  context->getOrLoadDialect<mlir::cf::ControlFlowDialect>();
+  context->getOrLoadDialect<mlir::func::FuncDialect>();
+  context->getOrLoadDialect<mlir::LLVM::LLVMDialect>();
+  context->getOrLoadDialect<mlir::memref::MemRefDialect>();
+  context->getOrLoadDialect<mlir::scf::SCFDialect>();
 
-  mlir::OwningOpRef<mlir::ModuleOp> module =
-      mlir::ModuleOp::create(mlir::UnknownLoc::get(&context));
-  translateTensorSource(*module, source);
+  return context;
+}
 
-  lowerToLLVM(*module);
+std::unique_ptr<mlir::ExecutionEngine> compileCPU(mlir::ModuleOp module,
+                                                std::string *loweredLLVMIR) {
+  lowerToLLVM(module);
   if (loweredLLVMIR) {
     llvm::raw_string_ostream stream(*loweredLLVMIR);
-    module->print(stream);
+    module.print(stream);
   }
-
   mlir::ExecutionEngineOptions options;
+  // ExecutionEngineOptions holds a non-owning function_ref.
   auto transformer = mlir::makeOptimizingTransformer(2, 0, nullptr);
   options.transformer = transformer;
-  auto maybeEngine = mlir::ExecutionEngine::create(*module, options);
-  if (!maybeEngine)
-    throwLLVMError(maybeEngine.takeError(), "could not create CPU JIT");
-  std::unique_ptr<mlir::ExecutionEngine> engine = std::move(*maybeEngine);
+  auto engine = mlir::ExecutionEngine::create(module, options);
+  if (!engine)
+    throwLLVMError(engine.takeError(), "could not create CPU JIT");
+  return std::move(*engine);
+}
+
+} // namespace
+
+std::vector<int32_t> runTensorLiteralCPU(const std::string &source,
+                                         std::string *loweredLLVMIR) {
+  auto context = makeCPUContext();
+  mlir::OwningOpRef<mlir::ModuleOp> module =
+      mlir::ModuleOp::create(mlir::UnknownLoc::get(context.get()));
+  translateTensorSource(*module, source);
+
+  auto engine = compileCPU(*module, loweredLLVMIR);
 
   auto maybeFunction = engine->lookup("_mlir_ciface_tensor_literal");
   if (!maybeFunction)
@@ -111,6 +121,43 @@ std::vector<int32_t> runTensorLiteralCPU(const std::string &source,
     output.push_back(
         descriptor.data[descriptor.offset + i * descriptor.strides[0]]);
   std::free(descriptor.basePtr);
+  return output;
+}
+
+std::vector<int32_t> runTensorCPU(const std::string &expression,
+                                 std::span<const TensorArgument> arguments,
+                                 std::string *loweredLLVMIR) {
+  if (loweredLLVMIR)
+    loweredLLVMIR->clear();
+  std::vector<TensorArgumentSpec> specs;
+  for (const auto &argument : arguments)
+    specs.push_back({argument.name, argument.values.size()});
+  auto context = makeCPUContext();
+  mlir::OwningOpRef<mlir::ModuleOp> module =
+      mlir::ModuleOp::create(mlir::UnknownLoc::get(context.get()));
+  translateTensorExpression(*module, expression, specs);
+
+  const auto input = arguments.front().values;
+  if (input.size() > std::vector<int32_t>().max_size())
+    throw std::invalid_argument("tensor element count exceeds host buffer range");
+  // Validate even empty expressions before returning, without creating a JIT.
+  if (input.empty())
+    return {};
+  std::vector<int32_t> output(input.size());
+  auto engine = compileCPU(*module, loweredLLVMIR);
+  auto function = engine->lookup("_mlir_ciface_tensor_expression");
+  if (!function)
+    throwLLVMError(function.takeError(), "CPU JIT lookup failed");
+  // MLIR's descriptor ABI uses mutable pointers even for read-only inputs.
+  // The verified map reads input and writes only the independent output.
+  auto *data = const_cast<int32_t *>(input.data());
+  StridedMemRefType<int32_t, 1> in{
+      data, data, 0, {static_cast<int64_t>(input.size())}, {1}};
+  StridedMemRefType<int32_t, 1> out{
+      output.data(), output.data(), 0, {static_cast<int64_t>(output.size())}, {1}};
+  using Function = void (*)(StridedMemRefType<int32_t, 1> *,
+                            StridedMemRefType<int32_t, 1> *);
+  reinterpret_cast<Function>(*function)(&in, &out);
   return output;
 }
 

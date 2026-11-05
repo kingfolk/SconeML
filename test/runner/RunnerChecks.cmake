@@ -165,4 +165,35 @@ file(WRITE "${SCRATCH}/unused-host-input.mlir" [=[// @test
 module {}
 ]=])
 expect_failure(unused-host-input "tensor-input requires an IR execution run" --file "${SCRATCH}/unused-host-input.mlir")
-message(STATUS "Runner configuration, assertion, selection, launch and IR-input contracts passed")
+
+# Production external-input source runs have separate per-run named arguments.
+file(READ "${DATA_ROOT}/external_input/identity.ml" source_inputs)
+string(REPLACE "    arguments:" "    typo-arguments:" changed "${source_inputs}")
+file(WRITE "${SCRATCH}/unknown-arguments.ml" "${changed}")
+expect_failure(unknown-arguments "unknown key" --file "${SCRATCH}/unknown-arguments.ml")
+string(REPLACE "pipeline: tensor-input-cpu" "pipeline: tensor-cpu" changed "${source_inputs}")
+file(WRITE "${SCRATCH}/literal-arguments.ml" "${changed}")
+expect_failure(literal-arguments "arguments is only supported" --file "${SCRATCH}/literal-arguments.ml")
+string(REPLACE "values:" "extra: 0\n        values:" changed "${source_inputs}")
+file(WRITE "${SCRATCH}/unknown-argument-field.ml" "${changed}")
+expect_failure(unknown-argument-field "unknown key" --file "${SCRATCH}/unknown-argument-field.ml")
+string(REPLACE "2147483647" "2147483648" changed "${source_inputs}")
+file(WRITE "${SCRATCH}/wide-source-value.ml" "${changed}")
+expect_failure(wide-source-value "invalid YAML" --file "${SCRATCH}/wide-source-value.ml")
+string(REPLACE "pipeline: tensor-input-cpu" "pipeline: tensor-input-metal" changed "${source_inputs}")
+file(WRITE "${SCRATCH}/unimplemented-source-metal.ml" "${changed}")
+expect_failure(unimplemented-source-metal "unknown pipeline" --file "${SCRATCH}/unimplemented-source-metal.ml" --no-metal)
+file(WRITE "${SCRATCH}/missing-arguments.ml" [=[(* @test
+version: 1
+input: source
+runs:
+  - name: cpu
+    pipeline: tensor-input-cpu
+*)
+(* @assert:cpu:result
+[1]
+*)
+xs
+]=])
+expect_failure(missing-arguments "requires source input and arguments" --file "${SCRATCH}/missing-arguments.ml")
+message(STATUS "Runner configuration, assertion, launch and source/IR input contracts passed")
