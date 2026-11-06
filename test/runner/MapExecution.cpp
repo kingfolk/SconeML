@@ -59,10 +59,10 @@ void executeMapIR(mlir::ModuleOp module, const TestCase &test, const Run &run,
               mlir::isa<mlir::func::ReturnOp>(body.back()),
           "IR execution requires only a tensor_map followed by func.return");
   auto map = mlir::cast<letalg::TensorMapOp>(body.front());
-  auto type = mlir::cast<mlir::MemRefType>(map.getInput().getType());
-  require(type.hasStaticShape() && type.getLayout().isIdentity() &&
+  auto type = mlir::cast<mlir::MemRefType>(map.getInputs().front().getType());
+  require(map.getInputs().size() == 1 && type.hasStaticShape() && type.getLayout().isIdentity() &&
               !type.getMemorySpace() &&
-              map.getInput() == function.getArgument(0) &&
+              map.getInputs().front() == function.getArgument(0) &&
               map.getOutput() == function.getArgument(1),
           "IR execution requires static identity-layout host buffer arguments");
   require(test.tensorInput &&

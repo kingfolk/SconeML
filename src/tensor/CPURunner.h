@@ -11,7 +11,7 @@ namespace sconeml::tensor {
 std::vector<int32_t> runTensorLiteralCPU(
     const std::string &source, std::string *loweredLLVMIR = nullptr);
 
-// One-shot JIT over one read-only host tensor. The returned vector owns its
+// One-shot JIT over 1-3 equal-length read-only host tensors. The returned vector owns its
 // storage. Empty input validates/translates, then returns without JIT; its
 // optional LLVM dump is empty. Unsupported syntax/arguments throw.
 std::vector<int32_t> runTensorCPU(

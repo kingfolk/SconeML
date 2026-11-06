@@ -90,11 +90,11 @@ reference, reproducible source/IR fixtures and real CPU/Metal result checks.
 Python 3 is required for the read-only fixture consistency check in CTest.
 The IR execution adapters are test-only; the source API still accepts literals.
 
-The CPU and GPU runners additionally accept [one external host tensor](docs/external-tensor-input.md):
+The CPU and GPU runners additionally accept [one to three external host tensors](docs/external-tensor-input.md):
 `runTensorCPU("xs * xs + 1", arguments)` or `runTensorGPU(...)` accepts named
 i32 data and returns a new host vector. The expression is specialized to the supplied length; input values
-are not embedded in IR. GPU execution uses the same frontend and existing Metal runtime; multi-input
-support remains a later feature. Existing literal APIs continue to work.
+are not embedded in IR. GPU execution uses the same frontend and existing Metal runtime.
+Equal-length inputs can be combined as `a * b + c`; see [multi-input maps](docs/multi-input-tensor-map.md). Existing literal APIs continue to work.
 
 ## ML in MLIR dialect
 

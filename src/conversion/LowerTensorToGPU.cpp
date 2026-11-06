@@ -17,7 +17,7 @@ lowerTensorMapToGPU(letalg::TensorMapOp map) {
   // no host capture or unsupported scalar operation may enter device IR.
   if (mlir::failed(mlir::verify(map)))
     return mlir::failure();
-  auto inputType = mlir::cast<mlir::MemRefType>(map.getInput().getType());
+  auto inputType = mlir::cast<mlir::MemRefType>(map.getInputs().front().getType());
   if (!inputType.getLayout().isIdentity() || inputType.getMemorySpace()) {
     map.emitOpError("GPU lowering requires identity layout in the default host "
                     "memory space");
@@ -40,10 +40,12 @@ lowerTensorMapToGPU(letalg::TensorMapOp map) {
   auto bufferType =
       mlir::MemRefType::get({mlir::ShapedType::kDynamic}, builder.getI32Type(),
                             mlir::MemRefLayoutAttrInterface{}, global);
+  const auto inputCount = map.getInputs().size();
+  llvm::SmallVector<mlir::Type> parameters(inputCount + 1, bufferType);
+  parameters.push_back(builder.getI32Type());
   auto kernel = mlir::gpu::GPUFuncOp::create(
       builder, loc, "tensor_map",
-      builder.getFunctionType({bufferType, bufferType, builder.getI32Type()},
-                              {}));
+      builder.getFunctionType(parameters, {}));
   kernel->setAttr(mlir::gpu::GPUDialect::getKernelFuncAttrName(),
                   builder.getUnitAttr());
   auto &entry = kernel.getBody().front();
@@ -57,7 +59,7 @@ lowerTensorMapToGPU(letalg::TensorMapOp map) {
   auto base = mlir::arith::MulIOp::create(builder, loc, block, width);
   auto index = mlir::arith::AddIOp::create(builder, loc, base, thread);
   auto count = mlir::arith::IndexCastUIOp::create(
-      builder, loc, builder.getIndexType(), entry.getArgument(2));
+      builder, loc, builder.getIndexType(), entry.getArgument(inputCount + 1));
   auto inBounds = mlir::arith::CmpIOp::create(
       builder, loc, mlir::arith::CmpIPredicate::ult, index, count);
   auto &body = map.getBody().front();
@@ -65,16 +67,18 @@ lowerTensorMapToGPU(letalg::TensorMapOp map) {
   mlir::scf::IfOp::create(
       builder, loc, inBounds,
       [&](mlir::OpBuilder &bodyBuilder, mlir::Location bodyLoc) {
-        auto element = mlir::memref::LoadOp::create(
-            bodyBuilder, bodyLoc, entry.getArgument(0), mlir::ValueRange{index},
-            mlir::BoolAttr{}, mlir::IntegerAttr{});
         mlir::IRMapping mapping;
-        mapping.map(body.getArgument(0), element.getResult());
+        for (unsigned i = 0; i < inputCount; ++i) {
+          auto element = mlir::memref::LoadOp::create(
+              bodyBuilder, bodyLoc, entry.getArgument(i), mlir::ValueRange{index},
+              mlir::BoolAttr{}, mlir::IntegerAttr{});
+          mapping.map(body.getArgument(i), element.getResult());
+        }
         for (mlir::Operation &operation : body.without_terminator())
           bodyBuilder.clone(operation, mapping);
         mlir::memref::StoreOp::create(
             bodyBuilder, bodyLoc, mapping.lookup(yield.getExpr()),
-            entry.getArgument(1), mlir::ValueRange{index}, mlir::BoolAttr{},
+            entry.getArgument(inputCount), mlir::ValueRange{index}, mlir::BoolAttr{},
             mlir::IntegerAttr{});
         mlir::scf::YieldOp::create(bodyBuilder, bodyLoc);
       });

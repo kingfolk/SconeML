@@ -11,6 +11,7 @@ namespace sconeml::tensor {
 
 bool metalIsAvailable();
 std::string metalDeviceName();
+using MetalInput = std::span<const int32_t>;
 
 struct MetalLaunchOptions {
   // Zero selects min(256, the device/pipeline limit).
@@ -34,6 +35,15 @@ MetalLaunch planMetalLaunch(
 // without a device. Only the first elementCount elements are read/written.
 void runMetalKernel(const std::string &source, const std::string &entrypoint,
                     std::span<const int32_t> input, std::span<int32_t> output,
+                    std::size_t elementCount, MetalLaunchOptions options = {});
+
+// Export metadata must agree with the actual 1–3 input buffers. Each buffer
+// covers elementCount elements. Inputs bind at 0..K-1, output at K, count K+1.
+void validateMetalInputs(std::size_t exportedInputCount,
+                         std::span<const MetalInput> inputs, std::size_t count);
+void runMetalKernel(const std::string &source, const std::string &entrypoint,
+                    std::size_t exportedInputCount,
+                    std::span<const MetalInput> inputs, std::span<int32_t> output,
                     std::size_t elementCount, MetalLaunchOptions options = {});
 
 } // namespace sconeml::tensor

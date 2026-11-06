@@ -16,9 +16,9 @@ struct TensorArgumentSpec {
   std::size_t elementCount;
 };
 
-// Translate constants, one named tensor, and wrapping + / - / * to a function
+// Translate constants, 1-3 named tensors, and wrapping + / - / * to a function
 // with explicit input/output buffers. Specializes the shape for this call.
-// Exactly one argument is currently supported. Empty shapes are valid, but
+// Arguments must have unique names and matching lengths. Empty shapes are valid;
 // names and expression syntax are still validated. No execution occurs here.
 void translateTensorExpression(mlir::ModuleOp module,
                                const std::string &expression,

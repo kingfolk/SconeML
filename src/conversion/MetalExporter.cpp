@@ -70,16 +70,22 @@ mlir::FailureOr<mlir::gpu::GPUFuncOp> validate(mlir::ModuleOp module) {
   }
   auto kernel = *kernels.begin();
   auto type = kernel.getFunctionType();
-  if (!kernel.isKernel() || !llvm::hasSingleElement(kernel.getBody()) ||
-      type.getNumInputs() != 3 || type.getNumResults() != 0 ||
-      !isGlobalBuffer(type.getInput(0)) || !isGlobalBuffer(type.getInput(1)) ||
-      !type.getInput(2).isSignlessInteger(32) ||
-      kernel.getBody().front().getNumArguments() != 3) {
+  const auto parameters = type.getNumInputs();
+  bool signature = kernel.isKernel() && llvm::hasSingleElement(kernel.getBody()) &&
+                   parameters >= 3 && parameters <= 5 && type.getNumResults() == 0;
+  if (signature) {
+    signature = kernel.getBody().front().getNumArguments() == parameters &&
+                type.getInput(parameters - 1).isSignlessInteger(32);
+    for (unsigned i = 0; i + 1 < parameters; ++i)
+      signature &= isGlobalBuffer(type.getInput(i));
+  }
+  if (!signature) {
     reject(kernel,
            "expected global identity-layout rank-1 dynamic i32 "
            "input/output and an i32 count, with no memory attributions");
     return mlir::failure();
   }
+  const unsigned inputCount = parameters - 2;
   auto &entry = kernel.getBody().front();
   llvm::SmallVector<mlir::Operation *> ops;
   for (auto &op : entry)
@@ -113,7 +119,7 @@ mlir::FailureOr<mlir::gpu::GPUFuncOp> validate(mlir::ModuleOp module) {
       base.getRhs() != width.getResult() ||
       index.getLhs() != base.getResult() ||
       index.getRhs() != thread.getResult() ||
-      count.getIn() != entry.getArgument(2) || !count.getType().isIndex() ||
+      count.getIn() != entry.getArgument(inputCount + 1) || !count.getType().isIndex() ||
       cmp.getPredicate() != mlir::arith::CmpIPredicate::ult ||
       cmp.getLhs() != index.getResult() || cmp.getRhs() != count.getResult() ||
       guard.getCondition() != cmp.getResult() || guard.getNumResults() != 0 ||
@@ -134,27 +140,33 @@ mlir::FailureOr<mlir::gpu::GPUFuncOp> validate(mlir::ModuleOp module) {
   }
 
   auto &body = guard.getThenRegion().front();
-  if (body.getOperations().size() < 3) {
+  if (body.getOperations().size() < inputCount + 2) {
     reject(guard,
            "expected a guarded load, scalar computation, store and yield");
     return mlir::failure();
   }
-  auto load = mlir::dyn_cast<mlir::memref::LoadOp>(&body.front());
   auto store =
       mlir::dyn_cast<mlir::memref::StoreOp>(&*std::prev(body.end(), 2));
   auto yield = mlir::dyn_cast<mlir::scf::YieldOp>(&body.back());
-  if (!load || !store || !yield || yield.getNumOperands() != 0 ||
-      load.getMemref() != entry.getArgument(0) ||
-      store.getMemref() != entry.getArgument(1) ||
-      load.getIndices().size() != 1 || store.getIndices().size() != 1 ||
-      load.getIndices()[0] != index.getResult() ||
-      store.getIndices()[0] != index.getResult()) {
+  if (!store || !yield || yield.getNumOperands() != 0 ||
+      store.getMemref() != entry.getArgument(inputCount) ||
+      store.getIndices().size() != 1 || store.getIndices()[0] != index.getResult()) {
     reject(guard,
            "expected input[index] load and output[index] store inside guard");
     return mlir::failure();
   }
-  llvm::DenseSet<mlir::Value> scalars{load.getResult()};
-  for (auto it = std::next(body.begin()); &*it != store.getOperation(); ++it) {
+  llvm::DenseSet<mlir::Value> scalars;
+  auto scalarBegin = body.begin();
+  for (unsigned i = 0; i < inputCount; ++i, ++scalarBegin) {
+    auto load = mlir::dyn_cast<mlir::memref::LoadOp>(&*scalarBegin);
+    if (!load || load.getMemref() != entry.getArgument(i) ||
+        load.getIndices().size() != 1 || load.getIndices()[0] != index.getResult()) {
+      reject(guard, "expected input[index] load and output[index] store inside guard");
+      return mlir::failure();
+    }
+    scalars.insert(load.getResult());
+  }
+  for (auto it = scalarBegin; &*it != store.getOperation(); ++it) {
     auto *op = &*it;
     if (!mlir::isa<mlir::arith::ConstantOp, mlir::arith::AddIOp,
                    mlir::arith::SubIOp, mlir::arith::MulIOp>(op) ||
@@ -226,7 +238,8 @@ public:
                         .getZExtValue()
                  << "u";
         else if (auto load = mlir::dyn_cast<mlir::memref::LoadOp>(op))
-          stream << "input[" << names.lookup(load.getIndices()[0]) << "]";
+          stream << names.lookup(load.getMemref()) << "["
+                 << names.lookup(load.getIndices()[0]) << "]";
         else if (mlir::isa<mlir::arith::IndexCastUIOp>(op))
           stream << names.lookup(op.getOperand(0));
         else {
@@ -258,21 +271,23 @@ mlir::FailureOr<MetalKernelSource> exportMetalKernel(mlir::ModuleOp module) {
   MetalKernelSource result;
   result.entrypoint = "tensor_map";
   llvm::raw_string_ostream stream(result.source);
-  stream << "#include <metal_stdlib>\nusing namespace metal;\n\n"
-            "kernel void tensor_map(device const uint *input [[buffer(0)]],\n"
-            "                       device uint *output [[buffer(1)]],\n"
-            "                       constant uint &count [[buffer(2)]],\n"
-            "                       uint3 group_id "
-            "[[threadgroup_position_in_grid]],\n"
-            "                       uint3 group_size "
-            "[[threads_per_threadgroup]],\n"
-            "                       uint3 local_id "
-            "[[thread_position_in_threadgroup]]) {\n";
-  Emitter emitter(stream);
   auto &entry = (*kernel).getBody().front();
-  emitter.names[entry.getArgument(0)] = "input";
-  emitter.names[entry.getArgument(1)] = "output";
-  emitter.names[entry.getArgument(2)] = "count";
+  result.inputCount = entry.getNumArguments() - 2;
+  Emitter emitter(stream);
+  stream << "#include <metal_stdlib>\nusing namespace metal;\n\n";
+  for (unsigned i = 0; i < result.inputCount; ++i) {
+    auto name = result.inputCount == 1 ? std::string("input") : "input" + std::to_string(i);
+    stream << (i == 0 ? "kernel void tensor_map(" : "                       ")
+           << "device const uint *" << name << " [[buffer(" << i << ")]],\n";
+    emitter.names[entry.getArgument(i)] = name;
+  }
+  stream << "                       device uint *output [[buffer(" << result.inputCount << ")]],\n"
+         << "                       constant uint &count [[buffer(" << result.inputCount + 1 << ")]],\n"
+         << "                       uint3 group_id [[threadgroup_position_in_grid]],\n"
+         << "                       uint3 group_size [[threads_per_threadgroup]],\n"
+         << "                       uint3 local_id [[thread_position_in_threadgroup]]) {\n";
+  emitter.names[entry.getArgument(result.inputCount)] = "output";
+  emitter.names[entry.getArgument(result.inputCount + 1)] = "count";
   emitter.emitBlock(entry, 2);
   stream << "}\n";
   return result;

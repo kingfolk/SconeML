@@ -27,7 +27,7 @@ int main(int argc, char **argv) {
   using sconeml::tensor::TensorArgument;
   using sconeml::tensor::runTensorCPU;
   try {
-    require(argc == 2, "usage: cpu_input_contracts <polynomial.ml>");
+    require(argc == 3, "usage: cpu_input_contracts <polynomial.ml> <alias.ml>");
     const auto test = readCase(argv[1]);
     const auto &first = test.runs.at(0).arguments->at(0);
     const auto &changed = test.runs.at(1).arguments->at(0);
@@ -68,9 +68,28 @@ int main(int argc, char **argv) {
             "empty input must return without JIT or a stale LLVM dump");
     rejects("empty or missing an operand", [&] { runTensorCPU("", empty); });
     rejects("empty or missing an operand", [&] { runTensorCPU(" \t\r\n", empty); });
-    rejects("exactly one tensor argument", [&] { runTensorCPU(test.program, {}); });
-    std::array<TensorArgument, 2> tooMany{{arguments[0], arguments[0]}};
-    rejects("exactly one tensor argument", [&] { runTensorCPU(test.program, tooMany); });
+    rejects("between one and three tensor arguments", [&] { runTensorCPU(test.program, {}); });
+    std::array<TensorArgument, 4> tooMany{{arguments[0], arguments[0], arguments[0], arguments[0]}};
+    rejects("between one and three tensor arguments", [&] { runTensorCPU(test.program, tooMany); });
+
+
+    const auto multi = readCase(argv[2]);
+    const auto &multiRun = multi.runs.front();
+    std::vector<std::vector<int32_t>> storage;
+    for (const auto &argument : *multiRun.arguments)
+      storage.push_back(argument.values);
+    const auto before = storage;
+    std::vector<TensorArgument> aliased;
+    for (size_t i = 0; i < storage.size(); ++i)
+      aliased.push_back({multiRun.arguments->at(i).name, storage[i]});
+    require(storage.at(0) == storage.at(1), "alias fixture inputs must agree");
+    aliased[1].values = aliased[0].values;
+    const auto multiExpected = parseNumber(multi.assertions.at("cpu").front().value).values;
+    auto multiOutput = runTensorCPU(multi.program, aliased);
+    require(multiOutput == multiExpected && storage == before,
+            "CPU multi-input alias or binding contract failed");
+    multiOutput.front() ^= 1;
+    require(storage == before, "CPU multi-input output aliases input");
 
     // Synthetic size validation must not need an invalid span or huge allocation.
     mlir::MLIRContext context;

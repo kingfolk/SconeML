@@ -19,7 +19,7 @@ The function loads the GPU and supporting dialects into the supplied context as 
 
 ## Supported source maps
 
-Maps must satisfy the existing verifier: matching rank-1 i32 memrefs, distinct input/output SSA operands, a single isolated scalar block, and a matching yield. Scalar computation supports i32 constants and wrapping addition, subtraction, and multiplication. Implicit captures, memory effects, and no-wrap promises are rejected.
+Maps must satisfy the verifier: 1-3 matching rank-1 i32 input memrefs and one output, no output/input SSA alias, a single isolated scalar block with one argument per input, and a matching yield. Read-only inputs may alias. Scalar computation supports i32 constants and wrapping addition, subtraction, and multiplication. Implicit captures, memory effects, and no-wrap promises are rejected.
 
 GPU extraction additionally requires identity memref layouts and the default host memory space. Strided/offset layouts and non-default memory spaces produce a diagnostic rather than being silently reinterpreted as contiguous buffers.
 
@@ -29,9 +29,9 @@ The source memref may have a static or dynamic length. This describes the IR API
 
 | Argument | Device IR type | Contract for future execution |
 | --- | --- | --- |
-| 0: input | `memref<?xi32, #gpu.address_space<global>>` | Contiguous i32 input, read-only by convention |
-| 1: output | Same as input | Contiguous i32 output, separate allocation |
-| 2: count | i32 | Count interpreted as unsigned bits |
+| 0..K-1: inputs | `memref<?xi32, #gpu.address_space<global>>` | Contiguous i32 input, read-only by convention |
+| K: output | Same as input | Contiguous i32 output, separate allocation |
+| K+1: count | i32 | Count interpreted as unsigned bits |
 
 The generated body has this structure:
 
@@ -67,3 +67,5 @@ The production transformation remains in SconeMLTensorGPU. A separate small inte
 ## Execution status
 
 The public GPU runner now uses this extraction API and the independent MSL exporter for actual Metal execution. The `tensor-metal` data pipeline verifies numeric results with uniform padded dispatch; see [Metal runtime integration](metal-runtime.md). Lowering/export-only checks remain runnable without a device.
+
+Multi-input lowering loads every input at the same index inside the guard, maps all scalar block arguments, clones shared SSA definitions once, and stores the result. K=1 retains the original signature. See [multi-input maps](multi-input-tensor-map.md) for the source API, validated ABI and tests.

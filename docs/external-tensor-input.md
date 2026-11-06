@@ -1,9 +1,9 @@
-# One external tensor on CPU and Metal
+# External tensors on CPU and Metal
 
 `runTensorCPU` and `runTensorGPU` execute an elementwise expression over
-caller-provided host data. Both accept exactly one named, contiguous i32 input
-and return a new owning host vector. These are M2-A/B; multi-input expressions
-remain M2-C work. The existing literal CPU/GPU APIs remain available.
+caller-provided host data. Both accept one to three named, contiguous, equal-length i32 inputs
+and return a new owning host vector. M2-C extends the original M2-A/B
+single-input path; see [multi-input maps](multi-input-tensor-map.md). The existing literal CPU/GPU APIs remain available.
 
 ```cpp
 #include "src/tensor/CPURunner.h"
@@ -63,7 +63,7 @@ The initial grammar is deliberately restricted:
 
 ```text
 operand (('+' | '-' | '*') operand)*
-operand = argument-name | nonnegative-i32-constant
+operand = declared-argument-name | nonnegative-i32-constant
 ```
 
 Multiplication binds before addition/subtraction; addition and subtraction
@@ -75,7 +75,7 @@ raise an exception before IR construction or JIT execution.
 
 Negative/extreme host elements are supported independently of constant syntax.
 Operators preserve modulo-2^32 i32 semantics. Constant-only expressions such as
-`42` are permitted with one declared argument and produce one constant result
+`42` are permitted with declared arguments and produce one constant result
 per element. Parentheses, unary minus, division, tensor literals and general
 let/function expressions are outside this new entry's grammar. The legacy
 literal/scalar parser behavior is retained.
@@ -88,8 +88,8 @@ parser's unchecked operand indexing to malformed external-input expressions.
 
 `TensorArgumentSpec` carries only a name and element count. The shared
 `translateTensorExpression` entry takes a span of these specs and never sees
-host element values. It emits `func.func @tensor_expression` with two explicit
-memref arguments: borrowed input and independent output. A single existing
+host element values. It emits `func.func @tensor_expression` with K+1 explicit
+memref arguments: K borrowed inputs and an independent output. A single existing
 `letalg.tensor_map` contains the elementwise scalar region.
 
 Both literal translation and external-input translation use the same map-body
@@ -101,8 +101,8 @@ alloc/store operations to recover literal data. External GPU execution directly
 passes the caller span to the existing runtime. Production code does
 not import the F5 raw-IR test adapter.
 
-The external runner calls `_mlir_ciface_tensor_expression` with two rank-1
-strided-memref descriptors. They describe contiguous host buffers with offset 0
+The external runner calls `_mlir_ciface_tensor_expression` with K+1 rank-1
+strided-memref descriptors, using an exact function-pointer signature for K=1/2/3. They describe contiguous host buffers with offset 0
 and stride 1. The input descriptor ABI has mutable pointer fields, requiring a
 const cast; verified map semantics only read that buffer. Generated code does
 not allocate or free the caller's buffers. The only output allocation belongs
@@ -170,11 +170,11 @@ verify actual external-input GPU execution.
 Use `runTensorGPU(expression, arguments, &source, {4})` to request four threads
 per group; omit options for the runtime default. The existing input/output/count
 bindings (0/1/2), separate output allocation, uniform padded groups and u32
-launch bounds are unchanged. This API adds data binding and execution through
-the shared frontend, not another scalar compiler or a new launch algorithm.
+launch bounds are unchanged. The original M2-B API added data binding and execution through
+the shared frontend without another scalar compiler or launch algorithm.
 A nonempty GPU call without a device throws and never invokes the CPU runner.
 The non-Apple stub has the same validated empty behavior and rejects nonempty
-execution. No new source grammar, cache or multi-input support is introduced.
+execution. M2-B introduced no new source grammar or cache; M2-C multi-input support is described below.
 
 The existing source cases now include GPU runs with explicit results and CPU
 comparisons. `test/external_input/metal` adds mixed wrapping arithmetic at
@@ -195,3 +195,11 @@ Local M2-B validation on Apple M1 / LLVM+MLIR 22.1.8: external-input matrix
 forced no-device suite 172 PASS / 65 SKIP / 0 FAIL. CTest has nine entries.
 Direct API GPU ownership/execution contracts also passed with real Metal access.
 The explicit stub is tested on this Mac, not a separate Linux platform build.
+
+M2-C now generalizes the same APIs to 1-3 inputs. All names must be unique and
+all lengths must match, including unused arguments and empty arrays. Read-only
+host spans may alias; output remains independent. K=1 shader text/bindings and
+literal convenience behavior are preserved. For K>1 inputs bind at 0..K-1,
+output at K and count at K+1; the exported inputCount is checked by the runtime.
+The original single-input runMetalKernel overload delegates to the generalized
+implementation. See [M2-C details and tests](multi-input-tensor-map.md).

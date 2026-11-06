@@ -4,19 +4,22 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Support/LogicalResult.h"
 #include <string>
+#include <cstddef>
 
 namespace sconeml {
 
 struct MetalKernelSource {
   std::string source;
   std::string entrypoint;
+  std::size_t inputCount = 1;
 };
 
 // Export the verified one-dimensional map kernel produced by LowerTensorToGPU.
 // No device APIs are used and the input module is not modified. Unsupported IR
 // emits an MLIR diagnostic and returns failure, never partial executable
-// source. The emitted ABI is input/output/count at buffer(0/1/2), with uint
-// indexing. Launchers must use uniform one-dimensional threadgroups and check
+// source. For K inputs (1-3), bindings are inputs 0..K-1, output K, count K+1;
+// inputCount reports the validated arity. Indexing uses uint. Launchers must use
+// uniform one-dimensional threadgroups and check
 // capacities, count, and padded grid indices against the u32 range before
 // execution.
 mlir::FailureOr<MetalKernelSource> exportMetalKernel(mlir::ModuleOp module);

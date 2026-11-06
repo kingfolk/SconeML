@@ -11,10 +11,10 @@ runs:
 *)
 (* @assert:rejected:error
 stage: frontend
-message: requires exactly one tensor argument
+message: requires between one and three tensor arguments
 *)
 (* @assert:gpu-rejected:error
 stage: frontend
-message: requires exactly one tensor argument
+message: requires between one and three tensor arguments
 *)
 xs

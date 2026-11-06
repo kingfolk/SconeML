@@ -2,8 +2,28 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <array>
 
 namespace sconeml::tensor {
+void validateMetalInputs(std::size_t exportedInputCount,
+                         std::span<const MetalInput> inputs, std::size_t count) {
+  if (!exportedInputCount || exportedInputCount > 3 || inputs.size() != exportedInputCount)
+    throw std::runtime_error("Metal input buffer count does not match exported arity (1-3)");
+  for (auto input : inputs) {
+    if (input.size() < count)
+      throw std::runtime_error("Metal buffer capacity is smaller than element count");
+    if (count && !input.data())
+      throw std::runtime_error("Metal nonempty buffers require nonnull pointers");
+  }
+}
+
+void runMetalKernel(const std::string &source, const std::string &entrypoint,
+                    std::span<const int32_t> input, std::span<int32_t> output,
+                    std::size_t count, MetalLaunchOptions options) {
+  std::array<MetalInput, 1> inputs{input};
+  runMetalKernel(source, entrypoint, 1, inputs, output, count, options);
+}
+
 MetalLaunch planMetalLaunch(std::size_t count, std::size_t inputCapacity,
                            std::size_t outputCapacity, MetalLaunchOptions options,
                            std::size_t maxThreads, std::size_t maxBufferBytes) {

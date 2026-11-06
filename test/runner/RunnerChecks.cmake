@@ -205,3 +205,10 @@ expect_success(external-metal-empty "2 passed, 0 skipped" --file "${DATA_ROOT}/e
 expect_success(external-metal-invalid-expression "1 passed, 0 skipped" --file "${DATA_ROOT}/external_input/errors/empty-unknown.ml" --run gpu-rejected --no-metal --require-metal)
 expect_success(external-metal-invalid-width "2 passed, 0 skipped" --file "${DATA_ROOT}/external_input/metal/invalid-width.ml" --no-metal --require-metal)
 message(STATUS "Runner configuration, assertion, launch and source/IR input device-policy contracts passed")
+
+# Multi-input source calls remain data-driven and retain strict device policy.
+expect_success(multi-cpu "1 passed" --file "${DATA_ROOT}/multi_input/three-fma.ml" --run cpu)
+expect_success(multi-metal-skip "1 skipped" --file "${DATA_ROOT}/multi_input/three-fma.ml" --run metal --no-metal)
+expect_failure(multi-metal-required "required device unavailable" --file "${DATA_ROOT}/multi_input/three-fma.ml" --run metal --no-metal --require-metal)
+expect_success(multi-empty "2 passed, 0 skipped" --file "${DATA_ROOT}/multi_input/three-empty.ml" --no-metal --require-metal)
+expect_success(multi-shape-before-skip "2 passed, 0 skipped" --file "${DATA_ROOT}/multi_input/errors/empty-mismatched.ml" --no-metal --require-metal)
