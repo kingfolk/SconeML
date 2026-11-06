@@ -225,11 +225,14 @@ add_test(NAME tensor_interfaces COMMAND tensor_interfaces
 add_test(NAME metal_runtime_contracts COMMAND metal_runtime_checks)
 add_test(NAME metal_stub_contracts COMMAND metal_stub_checks)
 add_test(NAME cpu_input_contracts COMMAND cpu_input_contracts
-  ${CMAKE_CURRENT_SOURCE_DIR}/test/external_input/polynomial.ml)
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/external_input/polynomial.ml
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/multi_input/alias.ml)
 add_test(NAME gpu_input_contracts COMMAND gpu_input_contracts
-  ${CMAKE_CURRENT_SOURCE_DIR}/test/external_input/polynomial.ml)
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/external_input/polynomial.ml
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/multi_input/alias.ml)
 add_test(NAME gpu_input_stub_contracts COMMAND gpu_input_stub_contracts
-  ${CMAKE_CURRENT_SOURCE_DIR}/test/external_input/polynomial.ml)
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/external_input/polynomial.ml
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/multi_input/alias.ml)
 add_test(NAME reference_fixtures COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate.py --check)
 add_test(NAME runner_contracts COMMAND ${CMAKE_COMMAND}

@@ -10,6 +10,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include <stdexcept>
 #include <memory>
+#include <array>
 
 namespace sconeml::tensor {
 namespace {
@@ -36,11 +37,13 @@ sconeml::letalg::TensorMapOp findSingleMap(mlir::ModuleOp module) {
 }
 
 std::vector<int32_t> executeMap(sconeml::letalg::TensorMapOp map,
-                                 std::span<const int32_t> input,
+                                 std::span<const MetalInput> inputs,
                                  std::string *gpuSource,
                                  MetalLaunchOptions options) {
   // Check host-representable launch bounds before allocating the host output.
-  planMetalLaunch(input.size(), input.size(), input.size(), options);
+  const auto count = inputs.front().size();
+  validateMetalInputs(map.getInputs().size(), inputs, count);
+  planMetalLaunch(count, count, count, options);
   auto device = sconeml::lowerTensorMapToGPU(map);
   if (mlir::failed(device))
     throw std::runtime_error("GPU tensor map lowering failed");
@@ -48,9 +51,9 @@ std::vector<int32_t> executeMap(sconeml::letalg::TensorMapOp map,
   if (mlir::failed(kernel))
     throw std::runtime_error("GPU Metal export failed");
   if (gpuSource) *gpuSource = kernel->source;
-  std::vector<int32_t> output(input.size());
-  runMetalKernel(kernel->source, kernel->entrypoint, input, output, input.size(),
-                 options);
+  std::vector<int32_t> output(count);
+  runMetalKernel(kernel->source, kernel->entrypoint, kernel->inputCount,
+                 inputs, output, count, options);
   return output;
 }
 
@@ -64,17 +67,17 @@ int64_t constantInteger(mlir::Value value) {
 }
 
 std::vector<int32_t> readLiteral(sconeml::letalg::TensorMapOp map) {
-  auto type = mlir::dyn_cast<mlir::MemRefType>(map.getInput().getType());
+  auto type = mlir::dyn_cast<mlir::MemRefType>(map.getInputs().front().getType());
   if (!type || type.getRank() != 1 || !type.hasStaticShape() ||
       !type.getElementType().isInteger(32) ||
-      !map.getInput().getDefiningOp<mlir::memref::AllocOp>())
+      !map.getInputs().front().getDefiningOp<mlir::memref::AllocOp>())
     throw std::runtime_error("GPU runner requires a static rank-1 i32 tensor literal");
   std::vector<int32_t> values(type.getDimSize(0));
   std::vector<bool> initialized(values.size(), false);
   for (mlir::Operation &operation : *map->getBlock()) {
     if (&operation == map.getOperation()) break;
     auto store = mlir::dyn_cast<mlir::memref::StoreOp>(operation);
-    if (!store || store.getMemref() != map.getInput()) continue;
+    if (!store || store.getMemref() != map.getInputs().front()) continue;
     if (store.getIndices().size() != 1)
       throw std::runtime_error("invalid tensor literal index");
     int64_t index = constantInteger(store.getIndices()[0]);
@@ -111,7 +114,8 @@ std::vector<int32_t> runTensorLiteralGPU(const std::string &source,
   if (!result || result.getExpr() != let.getResult())
     throw std::runtime_error("GPU runner requires a top-level tensor literal expression");
   auto input = readLiteral(map);
-  return executeMap(map, input, gpuSource, options);
+  std::array<MetalInput, 1> inputs{input};
+  return executeMap(map, inputs, gpuSource, options);
 }
 
 std::vector<int32_t> runTensorGPU(const std::string &expression,
@@ -127,8 +131,10 @@ std::vector<int32_t> runTensorGPU(const std::string &expression,
   mlir::OwningOpRef<mlir::ModuleOp> module =
       mlir::ModuleOp::create(mlir::UnknownLoc::get(context.get()));
   translateTensorExpression(*module, expression, specs);
-  return executeMap(findSingleMap(*module), arguments.front().values,
-                     gpuSource, options);
+  std::vector<MetalInput> inputs;
+  for (const auto &argument : arguments)
+    inputs.push_back(argument.values);
+  return executeMap(findSingleMap(*module), inputs, gpuSource, options);
 }
 bool gpuIsAvailable() { return metalIsAvailable(); }
 std::string gpuName() { return metalDeviceName(); }

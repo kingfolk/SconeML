@@ -2,14 +2,14 @@
 version: 1
 input: source
 runs:
-  - name: rejected
+  - name: unused-second
     pipeline: tensor-input-cpu
     arguments:
       - name: "xs"
         values: [1]
       - name: "ys"
         values: [2]
-  - name: gpu-rejected
+  - name: gpu-unused-second
     pipeline: tensor-input-metal
     arguments:
       - name: "xs"
@@ -17,12 +17,12 @@ runs:
       - name: "ys"
         values: [2]
 *)
-(* @assert:rejected:error
-stage: frontend
-message: requires exactly one tensor argument
+(* @assert:unused-second:result
+[1]
 *)
-(* @assert:gpu-rejected:error
-stage: frontend
-message: requires exactly one tensor argument
+(* @assert:gpu-unused-second:result
+[1]
+*)(* @assert:gpu-unused-second:compare
+unused-second
 *)
 xs

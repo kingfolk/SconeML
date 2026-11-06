@@ -51,3 +51,17 @@ Data files retain explicit expected results and CPU comparisons for polynomial, 
 The broader fixed-seed arithmetic/reference matrix remains subsequent milestone work.
 
 F4 local validation on Apple M1 with LLVM/MLIR 22.1.8: the complete `--require-metal` suite passed 101 runs with zero skips/failures; all four CTest entries passed. Forced `--no-metal` passed 90 runs and explicitly skipped 11 device runs. The stub was also compiled separately with the same launch/empty-runtime contract checks.
+
+## Multiple input buffers (M2-C)
+
+The generalized overload receives exported inputCount and a span of read-only
+input spans, plus output/count/options. `validateMetalInputs` requires K=1..3,
+checks that list length matches metadata, and checks each input capacity. The
+existing plan checks apply to output, byte count, device limits and padded u32
+indices. These validations also run on the stub and for empty calls.
+
+Inputs bind at 0..K-1, output at K and count at K+1. Each input has its own
+Metal allocation; read-only host inputs may alias. Output is always separate.
+The original single-input runMetalKernel signature wraps its span in a one-item
+list and delegates, preserving K=1 behavior and one launch implementation.
+See [multi-input maps](multi-input-tensor-map.md) for metadata and validation.

@@ -132,15 +132,15 @@ def TensorMapOp : LetAlg_Op<"tensor_map", [IsolatedFromAbove]> {
   let summary = "elementwise map over a rank-1 tensor";
   let description = [{
     `tensor_map` invokes its single-block body once for every input element.
-    The body takes one scalar block argument and must terminate with
+    The body takes one scalar block argument per input (one to three) and must terminate with
     `letalg.yield` of the mapped scalar. The result is written to the output
-    buffer at the same index. Input and output must be matching rank-1 i32
+    buffer at the same index. All inputs and output must be matching rank-1 i32
     buffers. The body supports i32 constants and wrapping add/sub/mul only,
-    with no implicit captures or side effects. The map reads the input and
+    with no implicit captures or side effects. The map reads every input and
     writes the output; it is not a pure operation.
   }];
 
-  let arguments = (ins Arg<AnyMemRef, "input buffer", [MemRead]>:$input,
+  let arguments = (ins Arg<Variadic<AnyMemRef>, "input buffers", [MemRead]>:$inputs,
                        Arg<AnyMemRef, "output buffer", [MemWrite]>:$output);
   let results = (outs);
   let regions = (region SizedRegion<1>:$body);

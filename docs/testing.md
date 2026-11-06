@@ -208,3 +208,22 @@ CI and local CTest use the same runner. `RunnerChecks.cmake` generates temporary
 On the installed LLVM 22.1 distribution, ExecutionEngine depends on the monolithic MLIR/LLVM libraries. The unified targets use that linkage consistently to avoid duplicate MLIR interface TypeIDs from mixing component archives with the shared library. LLVM FileCheck remains a separate archive, resolving its support symbols through LLVM.
 
 The test migration preserves compiler semantics. Runtime integration additionally provides `tensor-metal` execution through the GPU IR/exporter path without adding language syntax, file imports, or dynamic tensor inputs.
+
+## Multi-input source execution (M2-C)
+
+Existing `tensor-input-cpu`, `tensor-input-ir` and `tensor-input-metal` runs now
+accept 1-3 declared arguments. No pipeline names or source grammar changed.
+Arguments must have unique names and equal lengths; even unused arguments are
+validated. `test/multi_input` contains explicit CPU/GPU expected arrays, binding
+order, repeated/unused input, signed wrapping, empty/mismatched shape and arity
+cases. The former two-argument rejection case is now a positive unused-input
+case; zero/four arguments remain errors.
+
+Raw IR cases check variadic body arity, per-operand read effects (including
+repeated SSA inputs), output alias rejection, layout/capture/effect restrictions,
+ordered GPU loads, shared SSA and complete three-input MSL. F5's raw execution
+adapter intentionally retains its single-input wrapper precondition. Direct
+CPU/GPU input contracts additionally read `multi_input/alias.ml` to exercise two
+host spans pointing to the same storage; ordinary numeric fixtures alone cannot
+prove actual host aliasing. Runtime contracts check exported arity mismatch,
+all-input capacity checks and valid empty two/three-input calls on real/stub APIs.

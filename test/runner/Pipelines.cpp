@@ -224,8 +224,10 @@ Output execute(const TestCase &test, const Run &run, bool disableMetal) {
                   ? "write"
                   : "other";
           bool bound = false;
+          auto *effectOperand = effect.getEffectValue<mlir::OpOperand *>();
           for (unsigned operand = 0; operand < map.getNumOperands(); ++operand)
-            if (effect.getValue() == map->getOperand(operand)) {
+            if (effectOperand ? effectOperand == &map->getOpOperand(operand)
+                              : effect.getValue() == map->getOperand(operand)) {
               output.effects +=
                   "  " + kind + " operand " + std::to_string(operand) + "\n";
               bound = true;

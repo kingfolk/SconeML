@@ -25,7 +25,7 @@ int main(int argc, char **argv) {
   using namespace sconeml::test;
   using namespace sconeml::tensor;
   try {
-    require(argc == 2, "usage: gpu_input_contracts <polynomial.ml>");
+    require(argc == 3, "usage: gpu_input_contracts <polynomial.ml> <alias.ml>");
     const auto test = readCase(argv[1]);
     const auto &first = test.runs.at(0).arguments->at(0);
     std::array<TensorArgument, 1> empty{{{first.name, {}}}};
@@ -36,9 +36,9 @@ int main(int argc, char **argv) {
             "empty GPU call must export and return without device access");
     rejects("empty or missing an operand", [&] { runTensorGPU("", empty); });
     rejects("unknown tensor expression variable", [&] { runTensorGPU("missing", empty); });
-    rejects("exactly one tensor argument", [&] { runTensorGPU(test.program, {}); });
-    std::array<TensorArgument, 2> tooMany{{empty[0], empty[0]}};
-    rejects("exactly one tensor argument", [&] { runTensorGPU(test.program, tooMany); });
+    rejects("between one and three tensor arguments", [&] { runTensorGPU(test.program, {}); });
+    std::array<TensorArgument, 4> tooMany{{empty[0], empty[0], empty[0], empty[0]}};
+    rejects("between one and three tensor arguments", [&] { runTensorGPU(test.program, tooMany); });
     rejects("threads per threadgroup", [&] {
       runTensorGPU(test.program, empty, nullptr,
           {static_cast<std::size_t>(std::numeric_limits<uint32_t>::max()) + 1});
@@ -79,6 +79,33 @@ int main(int argc, char **argv) {
       llvm::outs() << "SKIP GPU ownership: no device; nonempty API rejection checked\n";
     }
 #endif
+
+    const auto multi = readCase(argv[2]);
+    const auto &multiRun = multi.runs.front();
+    std::vector<std::vector<int32_t>> storage;
+    for (const auto &argument : *multiRun.arguments)
+      storage.push_back(argument.values);
+    const auto before = storage;
+    std::vector<TensorArgument> aliased;
+    for (size_t i = 0; i < storage.size(); ++i)
+      aliased.push_back({multiRun.arguments->at(i).name, storage[i]});
+    require(storage.at(0) == storage.at(1), "alias fixture inputs must agree");
+    aliased[1].values = aliased[0].values;
+#ifdef SCONEML_EXPECT_METAL_STUB
+    rejects("only available on macOS", [&] { runTensorGPU(multi.program, aliased); });
+#else
+    if (gpuIsAvailable()) {
+      const auto multiExpected = parseNumber(multi.assertions.at("cpu").front().value).values;
+      auto multiOutput = runTensorGPU(multi.program, aliased);
+      require(multiOutput == multiExpected && storage == before,
+              "GPU multi-input alias or binding contract failed");
+      multiOutput.front() ^= 1;
+      require(storage == before, "GPU multi-input output aliases input");
+    } else {
+      rejects("no Metal GPU is available", [&] { runTensorGPU(multi.program, aliased); });
+    }
+#endif
+
     llvm::outs() << "PASS GPU input validation, empty and no-fallback contracts\n";
     return 0;
   } catch (const std::exception &error) {

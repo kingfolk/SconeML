@@ -10,6 +10,7 @@
 
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 namespace sconeml {
 struct TranslateContext {
@@ -65,14 +66,13 @@ mlir::Value translateTensorLiteral(mlir::OpBuilder &builder,
 }
 
 mlir::Value translateTensorElementExpr(mlir::OpBuilder &builder, ExprNode *expr,
-                                       const std::string &tensorName,
-                                       mlir::Value element,
+                                       const std::unordered_map<std::string, mlir::Value> &elements,
                                        TranslateContext &ctx) {
   auto loc = builder.getUnknownLoc();
   if (expr->getKind() == ExprNode::Kind_Var) {
     auto *variable = static_cast<VarExprNode *>(expr);
-    if (variable->getName() == tensorName)
-      return element;
+    if (auto it = elements.find(variable->getName()); it != elements.end())
+      return it->second;
     auto value = ctx.find(variable->getName());
     if (!value || mlir::isa<mlir::ShapedType>(value.getType()))
       throw std::invalid_argument("unsupported tensor expression variable " +
@@ -86,10 +86,8 @@ mlir::Value translateTensorElementExpr(mlir::OpBuilder &builder, ExprNode *expr,
   }
   if (expr->getKind() == ExprNode::Kind_BinOp) {
     auto *binary = static_cast<BinopExprNode *>(expr);
-    auto left = translateTensorElementExpr(builder, binary->getL(), tensorName,
-                                           element, ctx);
-    auto right = translateTensorElementExpr(builder, binary->getR(), tensorName,
-                                            element, ctx);
+    auto left = translateTensorElementExpr(builder, binary->getL(), elements, ctx);
+    auto right = translateTensorElementExpr(builder, binary->getR(), elements, ctx);
     if (binary->getOp() == '*')
       return mlir::arith::MulIOp::create(builder, loc, left, right);
     if (binary->getOp() == '-')
@@ -100,19 +98,23 @@ mlir::Value translateTensorElementExpr(mlir::OpBuilder &builder, ExprNode *expr,
 }
 
 void translateTensorMapInto(mlir::OpBuilder &builder, ExprNode *expr,
-                            const std::string &tensorName, mlir::Value input,
-                            mlir::Value output, TranslateContext &ctx) {
+                            llvm::ArrayRef<std::string> tensorNames,
+                            mlir::ValueRange inputs, mlir::Value output,
+                            TranslateContext &ctx) {
   auto loc = builder.getUnknownLoc();
-  auto inputType = mlir::dyn_cast<mlir::MemRefType>(input.getType());
+  auto inputType = mlir::dyn_cast<mlir::MemRefType>(inputs.front().getType());
   if (!inputType || inputType.getRank() != 1)
     throw std::invalid_argument("tensor map input must be a rank-1 memref");
   auto map = sconeml::letalg::TensorMapOp::create(
-      builder, loc, input, output);
-  auto *body = builder.createBlock(&map.getBody(), {},
-                                   {inputType.getElementType()}, {loc});
+      builder, loc, inputs, output);
+  llvm::SmallVector<mlir::Type> types(inputs.size(), inputType.getElementType());
+  llvm::SmallVector<mlir::Location> locations(inputs.size(), loc);
+  auto *body = builder.createBlock(&map.getBody(), {}, types, locations);
   builder.setInsertionPointToStart(body);
-  auto result = translateTensorElementExpr(
-      builder, expr, tensorName, body->getArgument(0), ctx);
+  std::unordered_map<std::string, mlir::Value> elements;
+  for (auto [name, value] : llvm::zip(tensorNames, body->getArguments()))
+    elements.emplace(name, value);
+  auto result = translateTensorElementExpr(builder, expr, elements, ctx);
   sconeml::letalg::YieldOp::create(builder, loc, result);
   builder.setInsertionPointAfter(map);
 }
@@ -124,7 +126,7 @@ mlir::Value translateTensorMap(mlir::OpBuilder &builder, ExprNode *expr,
   if (!type || type.getRank() != 1)
     throw std::invalid_argument("tensor map input must be a rank-1 memref");
   auto output = mlir::memref::AllocOp::create(builder, builder.getUnknownLoc(), type);
-  translateTensorMapInto(builder, expr, tensorName, input, output, ctx);
+  translateTensorMapInto(builder, expr, {tensorName}, mlir::ValueRange{input}, output, ctx);
   return output.getResult();
 }
 

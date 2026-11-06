@@ -12,7 +12,7 @@ namespace sconeml::tensor {
 std::vector<int32_t> runTensorLiteralGPU(const std::string &source,
                                        std::string *gpuSource = nullptr,
                                        MetalLaunchOptions options = {});
-// One read-only external host tensor, using the shared expression frontend.
+// 1-3 equal-length read-only host tensors, using the shared expression frontend.
 // Returns owning host output after synchronous Metal execution. Empty inputs
 // still validate/lower/export, but do not access a device or dispatch.
 std::vector<int32_t> runTensorGPU(

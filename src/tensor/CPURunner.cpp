@@ -28,6 +28,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include <cstdlib>
+#include <array>
 #include <memory>
 #include <stdexcept>
 
@@ -150,14 +151,28 @@ std::vector<int32_t> runTensorCPU(const std::string &expression,
     throwLLVMError(function.takeError(), "CPU JIT lookup failed");
   // MLIR's descriptor ABI uses mutable pointers even for read-only inputs.
   // The verified map reads input and writes only the independent output.
-  auto *data = const_cast<int32_t *>(input.data());
-  StridedMemRefType<int32_t, 1> in{
-      data, data, 0, {static_cast<int64_t>(input.size())}, {1}};
-  StridedMemRefType<int32_t, 1> out{
-      output.data(), output.data(), 0, {static_cast<int64_t>(output.size())}, {1}};
-  using Function = void (*)(StridedMemRefType<int32_t, 1> *,
-                            StridedMemRefType<int32_t, 1> *);
-  reinterpret_cast<Function>(*function)(&in, &out);
+  using Descriptor = StridedMemRefType<int32_t, 1>;
+  std::array<Descriptor, 3> inputs;
+  for (size_t i = 0; i < arguments.size(); ++i) {
+    auto *data = const_cast<int32_t *>(arguments[i].values.data());
+    inputs[i] = {data, data, 0, {static_cast<int64_t>(input.size())}, {1}};
+  }
+  Descriptor out{output.data(), output.data(), 0,
+                 {static_cast<int64_t>(output.size())}, {1}};
+  // Match the generated C-interface signature exactly for each supported arity.
+  switch (arguments.size()) {
+  case 1:
+    reinterpret_cast<void (*)(Descriptor *, Descriptor *)>(*function)(&inputs[0], &out);
+    break;
+  case 2:
+    reinterpret_cast<void (*)(Descriptor *, Descriptor *, Descriptor *)>(*function)(
+        &inputs[0], &inputs[1], &out);
+    break;
+  case 3:
+    reinterpret_cast<void (*)(Descriptor *, Descriptor *, Descriptor *, Descriptor *)>(*function)(
+        &inputs[0], &inputs[1], &inputs[2], &out);
+    break;
+  }
   return output;
 }
 

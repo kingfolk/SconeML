@@ -109,7 +109,9 @@ void ConstantOp::build(mlir::OpBuilder &builder, mlir::OperationState &state,
 //===----------------------------------------------------------------------===//
 
 LogicalResult TensorMapOp::verify() {
-  auto inputType = dyn_cast<MemRefType>(getInput().getType());
+  if (getInputs().empty() || getInputs().size() > 3)
+    return emitOpError("expects between one and three input buffers");
+  auto inputType = dyn_cast<MemRefType>(getInputs().front().getType());
   auto outputType = dyn_cast<MemRefType>(getOutput().getType());
   if (!inputType || !outputType || inputType.getRank() != 1 ||
       outputType.getRank() != 1 || inputType != outputType)
@@ -117,16 +119,22 @@ LogicalResult TensorMapOp::verify() {
         "expects matching rank-1 input and output memref buffers");
   if (!inputType.getElementType().isSignlessInteger(32))
     return emitOpError("expects i32 input and output elements");
-  if (getInput() == getOutput())
-    return emitOpError("expects distinct input and output buffers");
+  for (Value input : getInputs()) {
+    if (input.getType() != outputType)
+      return emitOpError("expects matching rank-1 input and output memref buffers");
+    if (input == getOutput())
+      return emitOpError("expects distinct input and output buffers");
+  }
 
   if (getBody().empty() || !llvm::hasSingleElement(getBody()))
     return emitOpError("expects a single-block scalar body");
   Block &body = getBody().front();
-  if (body.getNumArguments() != 1 ||
-      body.getArgument(0).getType() != inputType.getElementType())
+  if (body.getNumArguments() != getInputs().size() ||
+      llvm::any_of(body.getArguments(), [&](BlockArgument argument) {
+        return argument.getType() != inputType.getElementType();
+      }))
     return emitOpError(
-        "expects one body argument matching the memref element type");
+        "expects one body argument matching the memref element type per input");
   auto yield = body.empty() ? YieldOp() : dyn_cast<YieldOp>(&body.back());
   if (!yield || yield.getExpr().getType() != inputType.getElementType())
     return emitOpError("body must yield the memref element type");

@@ -8,6 +8,7 @@ The public interface is in [MetalExporter.h](../src/conversion/MetalExporter.h):
 struct MetalKernelSource {
   std::string source;
   std::string entrypoint;
+  std::size_t inputCount;
 };
 mlir::FailureOr<MetalKernelSource> exportMetalKernel(mlir::ModuleOp module);
 ```
@@ -18,11 +19,11 @@ On success the returned strings own their data and do not depend on the MLIRCont
 
 The exporter first runs the MLIR verifier and checks the complete supported structure. Only then does it generate source. It does not attempt to export arbitrary GPU programs or to guess the meaning of unsupported operations.
 
-Supported input consists of exactly one `gpu.module` with one defined `gpu.func` kernel. Its arguments are two dynamic, identity-layout, rank-1 i32 memrefs in GPU global address space, followed by an i32 count. Results and workgroup/private memory attributions are unsupported.
+Supported input consists of exactly one `gpu.module` with one defined `gpu.func` kernel. Its arguments are 1-3 dynamic identity-layout rank-1 i32 input memrefs, one output of the same device type, and an i32 count. Results and workgroup/private memory attributions are unsupported.
 
 The entry block must contain the F2 linear-index envelope: x block ID, block dimension and thread ID, index multiplication/addition, unsigned count-to-index conversion, unsigned less-than comparison, a result-free bounds guard without an else branch, and a void return. Equivalent but differently ordered or optimized envelopes are currently rejected; this is intentionally a small exporter contract.
 
-Inside the guard, the first operation loads `input[index]` and the last write stores a local scalar result to `output[index]`. Between them, the exporter accepts only i32 integer constants and wrapping add/subtract/multiply. Operands must refer to the loaded element or earlier scalar results. No-wrap promises, captured count values inside scalar computation, other types, arbitrary casts/control flow, extra memory accesses, and incompatible indexing are rejected.
+Inside the guard, the first K operations load each input at `index`, in parameter order, and the last write stores a local scalar result to `output[index]`. Between them, the exporter accepts only i32 integer constants and wrapping add/subtract/multiply. Operands must refer to the loaded element or earlier scalar results. No-wrap promises, captured count values inside scalar computation, other types, arbitrary casts/control flow, extra memory accesses, and incompatible indexing are rejected.
 
 ## SSA values become temporaries
 
@@ -41,7 +42,7 @@ The square is defined once and referenced twice; the exporter does not recursive
 
 Buffers use `device const uint*` and `device uint*`, and all scalar/index arithmetic uses uint. Constants are emitted as their unsigned 32-bit bit patterns with a `u` suffix: -1 becomes `4294967295u`, INT_MIN becomes `2147483648u`, and INT_MAX becomes `2147483647u`. Integer arithmetic therefore retains the intended modulo-2^32 behavior. The bounds predicate uses bool.
 
-The emitted entrypoint is always `tensor_map`, independent of the input GPU function's symbol name. The result explicitly returns that name. Bindings are input at buffer(0), output at buffer(1), and a uint count at buffer(2).
+The emitted entrypoint is always `tensor_map`, independent of the input GPU function's symbol name. The result explicitly returns that name. For K inputs, bindings are inputs at buffer(0..K-1), output at buffer(K), and a uint count at buffer(K+1). `inputCount` records validated K for runtime arity checking; K=1 preserves original shader text and bindings.
 
 The index formula uses `threadgroup_position_in_grid.x * threads_per_threadgroup.x + thread_position_in_threadgroup.x`. A launcher must:
 
@@ -68,3 +69,5 @@ SconeMLMetalExporter is still ordinary C++ with no device API calls. The two rem
 ## Execution status
 
 The public GPU runner now extracts GPU IR, invokes this exporter, and passes the returned source and entrypoint to the one-shot Metal runtime. The recursive expression emitter has been removed. The `tensor-metal` test pipeline checks actual dispatch and numeric results; `metal-compile` continues to check compilation/pipeline creation only. See [runtime integration](metal-runtime.md) for launch geometry, bounds, and device validation commands.
+
+M2-C cases in `test/multi_input/ir` include a complete three-input expected MSL, ordered loads/SSA checks and rejection of swapped input loads. See [multi-input details](multi-input-tensor-map.md).

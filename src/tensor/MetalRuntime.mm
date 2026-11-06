@@ -27,13 +27,15 @@ std::string metalDeviceName() {
 }
 
 void runMetalKernel(const std::string &source, const std::string &entrypoint,
-                    std::span<const int32_t> input, std::span<int32_t> output,
+                    std::size_t exportedInputCount,
+                    std::span<const MetalInput> inputs, std::span<int32_t> output,
                     std::size_t elementCount, MetalLaunchOptions options) {
   // Reject host-side errors before touching Metal, including in CPU-only runs.
-  planMetalLaunch(elementCount, input.size(), output.size(), options);
+  validateMetalInputs(exportedInputCount, inputs, elementCount);
+  planMetalLaunch(elementCount, elementCount, output.size(), options);
   if (elementCount == 0)
     return;
-  if (!input.data() || !output.data())
+  if (!output.data())
     throw std::runtime_error("Metal nonempty buffers require nonnull pointers");
   if (entrypoint.empty())
     throw std::runtime_error("Metal entrypoint must not be empty");
@@ -69,17 +71,21 @@ void runMetalKernel(const std::string &source, const std::string &entrypoint,
     const auto maxThreads = std::min<std::size_t>(
         pipeline.maxTotalThreadsPerThreadgroup,
         device.maxThreadsPerThreadgroup.width);
-    const auto launch = planMetalLaunch(elementCount, input.size(), output.size(),
+    const auto launch = planMetalLaunch(elementCount, elementCount, output.size(),
                                        options, maxThreads, device.maxBufferLength);
     const std::size_t byteCount = launch.byteCount;
-    id<MTLBuffer> inputBuffer =
-        [device newBufferWithBytes:input.data()
-                            length:byteCount
-                           options:MTLResourceStorageModeShared];
+    id<MTLBuffer> inputBuffers[3] = {nil, nil, nil};
+    for (std::size_t i = 0; i < inputs.size(); ++i) {
+      inputBuffers[i] = [device newBufferWithBytes:inputs[i].data()
+                                          length:byteCount
+                                         options:MTLResourceStorageModeShared];
+      if (inputBuffers[i] == nil)
+        throw std::runtime_error("Metal buffer allocation failed");
+    }
     id<MTLBuffer> outputBuffer =
         [device newBufferWithLength:byteCount
                             options:MTLResourceStorageModeShared];
-    if (inputBuffer == nil || outputBuffer == nil)
+    if (outputBuffer == nil)
       throw std::runtime_error("Metal buffer allocation failed");
 
     id<MTLCommandQueue> queue = [device newCommandQueue];
@@ -88,10 +94,11 @@ void runMetalKernel(const std::string &source, const std::string &entrypoint,
     if (queue == nil || command == nil || encoder == nil)
       throw std::runtime_error("Metal command creation failed");
     [encoder setComputePipelineState:pipeline];
-    [encoder setBuffer:inputBuffer offset:0 atIndex:0];
-    [encoder setBuffer:outputBuffer offset:0 atIndex:1];
+    for (std::size_t i = 0; i < inputs.size(); ++i)
+      [encoder setBuffer:inputBuffers[i] offset:0 atIndex:i];
+    [encoder setBuffer:outputBuffer offset:0 atIndex:inputs.size()];
     uint32_t count = launch.count;
-    [encoder setBytes:&count length:sizeof(count) atIndex:2];
+    [encoder setBytes:&count length:sizeof(count) atIndex:inputs.size() + 1];
 
     // All groups have the same width, including the padded final group.
     // This matches group_id.x * group_size.x + local_id.x in exported MSL.

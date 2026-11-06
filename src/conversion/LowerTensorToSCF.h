@@ -21,7 +21,7 @@ public:
   mlir::LogicalResult
   matchAndRewrite(sconeml::letalg::TensorMapOp op,
                   mlir::PatternRewriter &rewriter) const override {
-    auto inputType = mlir::dyn_cast<mlir::MemRefType>(op.getInput().getType());
+    auto inputType = mlir::dyn_cast<mlir::MemRefType>(op.getInputs().front().getType());
     auto outputType =
         mlir::dyn_cast<mlir::MemRefType>(op.getOutput().getType());
     if (!inputType || !outputType || inputType.getRank() != 1 ||
@@ -33,7 +33,7 @@ public:
     mlir::Block &mapBody = op.getBody().front();
     auto yield =
         mlir::dyn_cast<sconeml::letalg::YieldOp>(mapBody.getTerminator());
-    if (!yield || mapBody.getNumArguments() != 1 ||
+    if (!yield || mapBody.getNumArguments() != op.getInputs().size() ||
         mapBody.getArgument(0).getType() != inputType.getElementType())
       return rewriter.notifyMatchFailure(
           op, "expected one element-typed body argument and yield terminator");
@@ -42,17 +42,18 @@ public:
     mlir::Value zero = mlir::arith::ConstantIndexOp::create(rewriter, loc, 0);
     mlir::Value one = mlir::arith::ConstantIndexOp::create(rewriter, loc, 1);
     mlir::Value size =
-        mlir::memref::DimOp::create(rewriter, loc, op.getInput(), zero);
+        mlir::memref::DimOp::create(rewriter, loc, op.getInputs().front(), zero);
 
     mlir::scf::ForOp::create(
         rewriter, loc, zero, size, one, mlir::ValueRange{},
         [&](mlir::OpBuilder &builder, mlir::Location bodyLoc, mlir::Value index,
             mlir::ValueRange) {
-          mlir::Value element = mlir::memref::LoadOp::create(
-              builder, bodyLoc, op.getInput(), mlir::ValueRange{index});
-
           mlir::IRMapping mapping;
-          mapping.map(mapBody.getArgument(0), element);
+          for (auto [argument, input] : llvm::zip(mapBody.getArguments(), op.getInputs())) {
+            mlir::Value element = mlir::memref::LoadOp::create(
+                builder, bodyLoc, input, mlir::ValueRange{index});
+            mapping.map(argument, element);
+          }
           for (mlir::Operation &bodyOp : mapBody.without_terminator())
             builder.clone(bodyOp, mapping);
 

@@ -4,6 +4,7 @@
 #include <limits>
 #include <stdexcept>
 #include <vector>
+#include <array>
 
 namespace {
 void require(bool condition, const char *message) {
@@ -70,6 +71,19 @@ int main() {
     require(planMetalLaunch(0, 0, 0).threadgroupCount == 0,
             "empty input must not dispatch");
     std::vector<int32_t> input{1}, output{123};
+    std::array<MetalInput, 2> two{input, input};
+    std::array<MetalInput, 3> three{input, input, input};
+    validateMetalInputs(2, two, 1); // Read-only aliasing is allowed.
+    runMetalKernel("", "", 2, two, {}, 0);
+    runMetalKernel("", "", 3, three, {}, 0);
+    rejects("exported arity", [&] { validateMetalInputs(3, two, 0); });
+    rejects("exported arity", [&] { validateMetalInputs(0, {}, 0); });
+    std::array<MetalInput, 4> four{};
+    rejects("exported arity", [&] { validateMetalInputs(4, four, 0); });
+    two[1] = {};
+    rejects("buffer capacity", [&] { validateMetalInputs(2, two, 1); });
+    three[2] = {};
+    rejects("buffer capacity", [&] { validateMetalInputs(3, three, 1); });
     rejects("buffer capacity", [&] {
       runMetalKernel("", "", input, output, 2);
     });
