@@ -9,8 +9,19 @@ runs:
         values: [1]
       - name: "ys"
         values: [2]
+  - name: gpu-rejected
+    pipeline: tensor-input-metal
+    arguments:
+      - name: "xs"
+        values: [1]
+      - name: "ys"
+        values: [2]
 *)
 (* @assert:rejected:error
+stage: frontend
+message: requires exactly one tensor argument
+*)
+(* @assert:gpu-rejected:error
 stage: frontend
 message: requires exactly one tensor argument
 *)

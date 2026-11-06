@@ -180,7 +180,7 @@ expect_failure(unknown-argument-field "unknown key" --file "${SCRATCH}/unknown-a
 string(REPLACE "2147483647" "2147483648" changed "${source_inputs}")
 file(WRITE "${SCRATCH}/wide-source-value.ml" "${changed}")
 expect_failure(wide-source-value "invalid YAML" --file "${SCRATCH}/wide-source-value.ml")
-string(REPLACE "pipeline: tensor-input-cpu" "pipeline: tensor-input-metal" changed "${source_inputs}")
+string(REPLACE "pipeline: tensor-input-cpu" "pipeline: tensor-input-unknown" changed "${source_inputs}")
 file(WRITE "${SCRATCH}/unimplemented-source-metal.ml" "${changed}")
 expect_failure(unimplemented-source-metal "unknown pipeline" --file "${SCRATCH}/unimplemented-source-metal.ml" --no-metal)
 file(WRITE "${SCRATCH}/missing-arguments.ml" [=[(* @test
@@ -196,4 +196,12 @@ runs:
 xs
 ]=])
 expect_failure(missing-arguments "requires source input and arguments" --file "${SCRATCH}/missing-arguments.ml")
-message(STATUS "Runner configuration, assertion, launch and source/IR input contracts passed")
+
+# Device policy for the production external-input GPU API, including no-op and
+# errors that must be checked before any device availability decision.
+expect_success(external-metal-skip "1 skipped" --file "${DATA_ROOT}/external_input/polynomial.ml" --run gpu-first --no-metal)
+expect_failure(external-metal-required "required device unavailable" --file "${DATA_ROOT}/external_input/polynomial.ml" --run gpu-first --no-metal --require-metal)
+expect_success(external-metal-empty "2 passed, 0 skipped" --file "${DATA_ROOT}/external_input/identity.ml" --run gpu-empty --no-metal --require-metal)
+expect_success(external-metal-invalid-expression "1 passed, 0 skipped" --file "${DATA_ROOT}/external_input/errors/empty-unknown.ml" --run gpu-rejected --no-metal --require-metal)
+expect_success(external-metal-invalid-width "2 passed, 0 skipped" --file "${DATA_ROOT}/external_input/metal/invalid-width.ml" --no-metal --require-metal)
+message(STATUS "Runner configuration, assertion, launch and source/IR input device-policy contracts passed")

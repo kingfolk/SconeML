@@ -7,8 +7,17 @@ runs:
     arguments:
       - name: "xs"
         values: []
+  - name: gpu-rejected
+    pipeline: tensor-input-metal
+    arguments:
+      - name: "xs"
+        values: []
 *)
 (* @assert:rejected:error
+stage: frontend
+message: "unknown tensor expression variable: ys"
+*)
+(* @assert:gpu-rejected:error
 stage: frontend
 message: "unknown tensor expression variable: ys"
 *)

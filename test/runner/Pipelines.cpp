@@ -83,7 +83,8 @@ Output execute(const TestCase &test, const Run &run, bool disableMetal) {
         return mlir::success();
       });
   try {
-    if (run.pipeline == "tensor-input-ir" || run.pipeline == "tensor-input-cpu") {
+    if (run.pipeline == "tensor-input-ir" || run.pipeline == "tensor-input-cpu" ||
+        run.pipeline == "tensor-input-metal") {
       output.stage = "frontend";
       std::vector<sconeml::tensor::TensorArgumentSpec> specs;
       std::vector<sconeml::tensor::TensorArgument> arguments;
@@ -99,12 +100,27 @@ Output execute(const TestCase &test, const Run &run, bool disableMetal) {
       } else {
         // Exercise the public source API, not the raw-IR test adapter.
         const auto before = *run.arguments;
-        output.stage = "cpu-execute";
-        output.number = Number{true, sconeml::tensor::runTensorCPU(
-                                         test.program, arguments, &output.ir)};
+        if (run.pipeline == "tensor-input-metal") {
+          output.stage = "metal-execute";
+          const auto count = arguments.front().values.size();
+          sconeml::tensor::planMetalLaunch(
+              count, count, count, {run.threadsPerThreadgroup.value_or(0)});
+          if (count && (disableMetal || !sconeml::tensor::gpuIsAvailable())) {
+            output.skipped = true;
+            output.diagnostic = "Metal device unavailable or disabled";
+            return output;
+          }
+          output.number = Number{true, sconeml::tensor::runTensorGPU(
+              test.program, arguments, &output.text,
+              {run.threadsPerThreadgroup.value_or(0)})};
+        } else {
+          output.stage = "cpu-execute";
+          output.number = Number{true, sconeml::tensor::runTensorCPU(
+                                           test.program, arguments, &output.ir)};
+        }
         for (size_t i = 0; i < before.size(); ++i)
           require(before[i].values == run.arguments->at(i).values,
-                  "CPU runner modified a caller input");
+                  "tensor runner modified a caller input");
       }
       output.success = true;
       return output;

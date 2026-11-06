@@ -27,6 +27,24 @@ runs:
     arguments:
       - name: "xs"
         values: [4, -1, 2]
+  - name: gpu-first
+    pipeline: tensor-input-metal
+    threads-per-group: 4
+    arguments:
+      - name: "xs"
+        values: [-2, 0, 3]
+  - name: gpu-changed
+    pipeline: tensor-input-metal
+    threads-per-group: 4
+    arguments:
+      - name: "xs"
+        values: [4, -1, 2]
+  - name: gpu-longer
+    pipeline: tensor-input-metal
+    threads-per-group: 4
+    arguments:
+      - name: "xs"
+        values: [-2147483648, 2147483647, -1, 0, 1, 46341]
 *)
 (* @assert:first:result
 [5, 1, 10]
@@ -69,5 +87,23 @@ module {
     func.return
   }
 }
+*)
+(* @assert:gpu-first:result
+[5, 1, 10]
+*)
+(* @assert:gpu-first:compare
+first
+*)
+(* @assert:gpu-changed:result
+[17, 2, 5]
+*)
+(* @assert:gpu-changed:compare
+changed
+*)
+(* @assert:gpu-longer:result
+[1, 2, 2, 1, 2, -2147479014]
+*)
+(* @assert:gpu-longer:compare
+longer
 *)
 xs * xs + 1

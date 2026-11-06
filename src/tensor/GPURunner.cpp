@@ -9,9 +9,51 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include <stdexcept>
+#include <memory>
 
 namespace sconeml::tensor {
 namespace {
+std::unique_ptr<mlir::MLIRContext> makeGPUContext() {
+  auto context = std::make_unique<mlir::MLIRContext>();
+  context->getOrLoadDialect<sconeml::letalg::LetAlgDialect>();
+  context->getOrLoadDialect<mlir::arith::ArithDialect>();
+  context->getOrLoadDialect<mlir::func::FuncDialect>();
+  context->getOrLoadDialect<mlir::memref::MemRefDialect>();
+  context->getOrLoadDialect<mlir::scf::SCFDialect>();
+  return context;
+}
+
+sconeml::letalg::TensorMapOp findSingleMap(mlir::ModuleOp module) {
+  sconeml::letalg::TensorMapOp map;
+  unsigned count = 0;
+  module.walk([&](sconeml::letalg::TensorMapOp candidate) {
+    map = candidate;
+    ++count;
+  });
+  if (count != 1)
+    throw std::runtime_error("GPU runner requires exactly one tensor map");
+  return map;
+}
+
+std::vector<int32_t> executeMap(sconeml::letalg::TensorMapOp map,
+                                 std::span<const int32_t> input,
+                                 std::string *gpuSource,
+                                 MetalLaunchOptions options) {
+  // Check host-representable launch bounds before allocating the host output.
+  planMetalLaunch(input.size(), input.size(), input.size(), options);
+  auto device = sconeml::lowerTensorMapToGPU(map);
+  if (mlir::failed(device))
+    throw std::runtime_error("GPU tensor map lowering failed");
+  auto kernel = sconeml::exportMetalKernel(**device);
+  if (mlir::failed(kernel))
+    throw std::runtime_error("GPU Metal export failed");
+  if (gpuSource) *gpuSource = kernel->source;
+  std::vector<int32_t> output(input.size());
+  runMetalKernel(kernel->source, kernel->entrypoint, input, output, input.size(),
+                 options);
+  return output;
+}
+
 int64_t constantInteger(mlir::Value value) {
   auto constant = value.getDefiningOp<mlir::arith::ConstantOp>();
   auto attr = constant ? mlir::dyn_cast<mlir::IntegerAttr>(constant.getValue())
@@ -51,23 +93,11 @@ std::vector<int32_t> readLiteral(sconeml::letalg::TensorMapOp map) {
 std::vector<int32_t> runTensorLiteralGPU(const std::string &source,
                                        std::string *gpuSource,
                                        MetalLaunchOptions options) {
-  mlir::MLIRContext context;
-  context.getOrLoadDialect<sconeml::letalg::LetAlgDialect>();
-  context.getOrLoadDialect<mlir::arith::ArithDialect>();
-  context.getOrLoadDialect<mlir::func::FuncDialect>();
-  context.getOrLoadDialect<mlir::memref::MemRefDialect>();
-  context.getOrLoadDialect<mlir::scf::SCFDialect>();
+  auto context = makeGPUContext();
   mlir::OwningOpRef<mlir::ModuleOp> module =
-      mlir::ModuleOp::create(mlir::UnknownLoc::get(&context));
+      mlir::ModuleOp::create(mlir::UnknownLoc::get(context.get()));
   translateTensorSource(*module, source);
-  sconeml::letalg::TensorMapOp map;
-  unsigned mapCount = 0;
-  module->walk([&](sconeml::letalg::TensorMapOp candidate) {
-    map = candidate;
-    ++mapCount;
-  });
-  if (mapCount != 1)
-    throw std::runtime_error("GPU runner requires exactly one tensor map");
+  auto map = findSingleMap(*module);
   auto let = mlir::dyn_cast_or_null<sconeml::letalg::LetOp>(map->getParentOp());
   auto letResult = let ? mlir::dyn_cast<sconeml::letalg::YieldOp>(
                              let.getRegion().front().getTerminator())
@@ -81,17 +111,24 @@ std::vector<int32_t> runTensorLiteralGPU(const std::string &source,
   if (!result || result.getExpr() != let.getResult())
     throw std::runtime_error("GPU runner requires a top-level tensor literal expression");
   auto input = readLiteral(map);
-  auto device = sconeml::lowerTensorMapToGPU(map);
-  if (mlir::failed(device))
-    throw std::runtime_error("GPU tensor map lowering failed");
-  auto kernel = sconeml::exportMetalKernel(**device);
-  if (mlir::failed(kernel))
-    throw std::runtime_error("GPU Metal export failed");
-  if (gpuSource) *gpuSource = kernel->source;
-  std::vector<int32_t> output(input.size());
-  runMetalKernel(kernel->source, kernel->entrypoint, input, output, input.size(),
-                 options);
-  return output;
+  return executeMap(map, input, gpuSource, options);
+}
+
+std::vector<int32_t> runTensorGPU(const std::string &expression,
+                                 std::span<const TensorArgument> arguments,
+                                 std::string *gpuSource,
+                                 MetalLaunchOptions options) {
+  if (gpuSource)
+    gpuSource->clear();
+  std::vector<TensorArgumentSpec> specs;
+  for (const auto &argument : arguments)
+    specs.push_back({argument.name, argument.values.size()});
+  auto context = makeGPUContext();
+  mlir::OwningOpRef<mlir::ModuleOp> module =
+      mlir::ModuleOp::create(mlir::UnknownLoc::get(context.get()));
+  translateTensorExpression(*module, expression, specs);
+  return executeMap(findSingleMap(*module), arguments.front().values,
+                     gpuSource, options);
 }
 bool gpuIsAvailable() { return metalIsAvailable(); }
 std::string gpuName() { return metalDeviceName(); }
