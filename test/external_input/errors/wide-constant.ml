@@ -1,0 +1,15 @@
+(* @test
+version: 1
+input: source
+runs:
+  - name: rejected
+    pipeline: tensor-input-cpu
+    arguments:
+      - name: "xs"
+        values: [1]
+*)
+(* @assert:rejected:error
+stage: frontend
+message: constant outside i32 range
+*)
+xs + 2147483648

@@ -186,6 +186,15 @@ add_executable(metal_stub_checks
 target_compile_options(metal_stub_checks PRIVATE -fexceptions)
 target_compile_definitions(metal_stub_checks PRIVATE SCONEML_EXPECT_METAL_STUB)
 
+add_llvm_executable(cpu_input_contracts
+  test/runner/CPUInputContracts.cpp
+  src/tensor/CPURunner.cpp
+  src/tensor/TensorFrontend.cpp
+  src/dialect/LetAlgDialect.cpp)
+target_compile_options(cpu_input_contracts PRIVATE -fexceptions)
+add_dependencies(cpu_input_contracts LetAlgDialectIncGen)
+target_link_libraries(cpu_input_contracts PRIVATE SconeMLTestSpec MLIR MLIRExecutionEngine)
+
 enable_testing()
 add_test(NAME compiler_suite COMMAND tester)
 add_test(NAME tensor_interfaces COMMAND tensor_interfaces
@@ -193,6 +202,8 @@ add_test(NAME tensor_interfaces COMMAND tensor_interfaces
   ${CMAKE_CURRENT_SOURCE_DIR}/test/metal_exporter/shared_square.mlir)
 add_test(NAME metal_runtime_contracts COMMAND metal_runtime_checks)
 add_test(NAME metal_stub_contracts COMMAND metal_stub_checks)
+add_test(NAME cpu_input_contracts COMMAND cpu_input_contracts
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/external_input/polynomial.ml)
 add_test(NAME reference_fixtures COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate.py --check)
 add_test(NAME runner_contracts COMMAND ${CMAKE_COMMAND}

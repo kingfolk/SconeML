@@ -6,7 +6,7 @@
 
 ```sh
 cmake -S . -B build
-cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks -j3
+cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts -j3
 ctest --test-dir build --output-on-failure
 ```
 
@@ -135,6 +135,28 @@ actual backend results. Run `python3 test/reference/generate.py --check` to
 verify the committed fixture set, or omit `--check` to deliberately regenerate
 it. Ordinary `tester` reads these self-contained files and never runs scripts.
 See the [acceptance record](m1-acceptance.md) for the seed, matrix and results.
+
+## Production external-input source runs
+
+M2-A adds `tensor-input-cpu` (the production `runTensorCPU` API) and
+`tensor-input-ir` (shared frontend only). Both require source input and a
+per-run `arguments` list of `{name, values}`. See
+[external input usage](external-tensor-input.md) for a full data-file example.
+The array values are i32; unknown fields and values outside i32 fail schema
+validation. An explicit empty argument list reaches production arity validation,
+while an omitted field is a configuration error. The field is rejected on
+unrelated pipelines. Unsupported external GPU pipelines are unknown, not skips.
+
+`tensor-input-cpu` supports numeric result/compare, LLVM IR and success/error
+assertions and checks that caller data remains unchanged. `tensor-input-ir`
+supports IR/text and success/error assertions. Expression/argument errors are
+reported at `frontend`. The F5 raw-IR adapters retain their separate file-level
+`tensor-input` field and restricted wrapper; their behavior is unchanged.
+
+CTest also runs `cpu_input_contracts` for direct API ownership, lifetime,
+empty-program/dump and synthetic-size checks that cannot be expressed as a
+normal nonempty test program. It reads numeric programs/data from the same
+fixtures and does not keep a second C++ table of compiler examples.
 
 ## Assertions
 

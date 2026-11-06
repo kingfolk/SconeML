@@ -99,16 +99,15 @@ mlir::Value translateTensorElementExpr(mlir::OpBuilder &builder, ExprNode *expr,
   throw std::invalid_argument("unsupported tensor expression " + expr->dump());
 }
 
-mlir::Value translateTensorMap(mlir::OpBuilder &builder, ExprNode *expr,
-                               const std::string &tensorName, mlir::Value input,
-                               TranslateContext &ctx) {
+void translateTensorMapInto(mlir::OpBuilder &builder, ExprNode *expr,
+                            const std::string &tensorName, mlir::Value input,
+                            mlir::Value output, TranslateContext &ctx) {
   auto loc = builder.getUnknownLoc();
   auto inputType = mlir::dyn_cast<mlir::MemRefType>(input.getType());
   if (!inputType || inputType.getRank() != 1)
     throw std::invalid_argument("tensor map input must be a rank-1 memref");
-  auto output = mlir::memref::AllocOp::create(builder, loc, inputType);
   auto map = sconeml::letalg::TensorMapOp::create(
-      builder, loc, input, output.getResult());
+      builder, loc, input, output);
   auto *body = builder.createBlock(&map.getBody(), {},
                                    {inputType.getElementType()}, {loc});
   builder.setInsertionPointToStart(body);
@@ -116,6 +115,16 @@ mlir::Value translateTensorMap(mlir::OpBuilder &builder, ExprNode *expr,
       builder, expr, tensorName, body->getArgument(0), ctx);
   sconeml::letalg::YieldOp::create(builder, loc, result);
   builder.setInsertionPointAfter(map);
+}
+
+mlir::Value translateTensorMap(mlir::OpBuilder &builder, ExprNode *expr,
+                               const std::string &tensorName, mlir::Value input,
+                               TranslateContext &ctx) {
+  auto type = mlir::dyn_cast<mlir::MemRefType>(input.getType());
+  if (!type || type.getRank() != 1)
+    throw std::invalid_argument("tensor map input must be a rank-1 memref");
+  auto output = mlir::memref::AllocOp::create(builder, builder.getUnknownLoc(), type);
+  translateTensorMapInto(builder, expr, tensorName, input, output, ctx);
   return output.getResult();
 }
 

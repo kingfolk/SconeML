@@ -35,7 +35,7 @@ write, so it is not treated as a pure operation by optimization passes.
 
 The [unified test runner](docs/testing.md) reads programs, pipeline configuration,
 and assertions from the same `.ml` or `.mlir` file. Run compiler tests without a
-GPU with `cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks` followed by
+GPU with `cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts` followed by
 `./build/tester --no-metal`.
 
 An independent [GPU kernel extraction](docs/gpu-kernel-lowering.md) API converts
@@ -60,7 +60,7 @@ cmake -S . -B build \
   -DLLVM_DIR="$(brew --prefix llvm@22)/lib/cmake/llvm" \
   -DMLIR_DIR="$(brew --prefix llvm@22)/lib/cmake/mlir" \
   -DCMAKE_CXX_COMPILER="$(brew --prefix llvm@22)/bin/clang++"
-cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks -j3
+cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts -j3
 ./build/tester --suite test/tensor --run cpu
 ```
 
@@ -89,6 +89,12 @@ The [M1 acceptance matrix](docs/m1-acceptance.md) adds an independent 32-bit
 reference, reproducible source/IR fixtures and real CPU/Metal result checks.
 Python 3 is required for the read-only fixture consistency check in CTest.
 The IR execution adapters are test-only; the source API still accepts literals.
+
+The CPU runner additionally accepts [one external host tensor](docs/external-tensor-input.md):
+`runTensorCPU("xs * xs + 1", arguments)` borrows named i32 data and returns a new
+host vector. The expression is specialized to the supplied length; input values
+are not embedded in IR. External-input GPU and multi-input support remain later
+features. Existing literal APIs continue to work.
 
 ## ML in MLIR dialect
 
