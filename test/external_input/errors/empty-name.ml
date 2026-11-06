@@ -7,8 +7,17 @@ runs:
     arguments:
       - name: ""
         values: [1]
+  - name: gpu-rejected
+    pipeline: tensor-input-metal
+    arguments:
+      - name: ""
+        values: [1]
 *)
 (* @assert:rejected:error
+stage: frontend
+message: invalid tensor argument name
+*)
+(* @assert:gpu-rejected:error
 stage: frontend
 message: invalid tensor argument name
 *)

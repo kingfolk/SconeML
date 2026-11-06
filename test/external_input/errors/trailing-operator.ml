@@ -7,8 +7,17 @@ runs:
     arguments:
       - name: "xs"
         values: [1]
+  - name: gpu-rejected
+    pipeline: tensor-input-metal
+    arguments:
+      - name: "xs"
+        values: [1]
 *)
 (* @assert:rejected:error
+stage: frontend
+message: missing an operand
+*)
+(* @assert:gpu-rejected:error
 stage: frontend
 message: missing an operand
 *)

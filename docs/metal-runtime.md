@@ -37,7 +37,7 @@ For `N = 5, W = 4`, group 0 handles indices 0–3, and group 1 has indices 4–7
 ## Validation
 
 ```sh
-cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts -j3
+cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts gpu_input_contracts gpu_input_stub_contracts -j3
 ctest --test-dir build --output-on-failure
 ./build/tester --no-metal
 ./build/tester --suite test/tensor --require-metal

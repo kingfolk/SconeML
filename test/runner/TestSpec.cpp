@@ -86,7 +86,7 @@ bool knownPipeline(const std::string &name) {
       "tensor-effects", "tensor-gpu-ir", "tensor-msl",          "metal-compile",
       "tensor-cpu",     "scalar-cpu",    "tensor-metal",        "legacy-letalg",
       "legacy-cpu", "tensor-cpu-ir", "tensor-metal-ir",
-      "tensor-input-cpu", "tensor-input-ir"};
+      "tensor-input-cpu", "tensor-input-ir", "tensor-input-metal"};
   return names.contains(name);
 }
 
@@ -94,7 +94,7 @@ static bool numericPipeline(const std::string &pipeline) {
   return pipeline == "tensor-cpu" || pipeline == "scalar-cpu" ||
          pipeline == "legacy-cpu" || pipeline == "tensor-metal" ||
          pipeline == "tensor-cpu-ir" || pipeline == "tensor-metal-ir" ||
-         pipeline == "tensor-input-cpu";
+         pipeline == "tensor-input-cpu" || pipeline == "tensor-input-metal";
 }
 
 static bool supports(const std::string &pipeline, const std::string &kind) {
@@ -120,7 +120,8 @@ static bool supports(const std::string &pipeline, const std::string &kind) {
   return pipeline == "letalg" || pipeline == "letalg-opt" ||
          pipeline == "legacy-letalg" || pipeline == "tensor-msl" ||
          pipeline == "metal-compile" || pipeline == "tensor-metal" ||
-         pipeline == "tensor-metal-ir" || pipeline == "tensor-input-ir";
+         pipeline == "tensor-metal-ir" || pipeline == "tensor-input-ir" ||
+         pipeline == "tensor-input-metal";
 }
 
 ExpectedError parseError(const std::string &text) {
@@ -288,7 +289,8 @@ TestCase parseCase(const std::string &path, const std::string &text) {
             "empty or duplicate run name: " + run.name);
     require(knownPipeline(run.pipeline), "unknown pipeline: " + run.pipeline);
     const bool sourceInputs = run.pipeline == "tensor-input-cpu" ||
-                              run.pipeline == "tensor-input-ir";
+                              run.pipeline == "tensor-input-ir" ||
+                              run.pipeline == "tensor-input-metal";
     require(!sourceInputs || (test.input == "source" && run.arguments.has_value()),
             "external-input pipeline requires source input and arguments");
     require(!run.arguments || sourceInputs,
@@ -301,7 +303,8 @@ TestCase parseCase(const std::string &path, const std::string &text) {
       consumesInput = true;
     }
     require(!run.threadsPerThreadgroup || run.pipeline == "tensor-metal" ||
-                run.pipeline == "tensor-metal-ir",
+                run.pipeline == "tensor-metal-ir" ||
+                run.pipeline == "tensor-input-metal",
             "threads-per-group is only supported by tensor-metal pipelines");
     require(!run.threadsPerThreadgroup || *run.threadsPerThreadgroup > 0,
             "threads-per-group must be positive");

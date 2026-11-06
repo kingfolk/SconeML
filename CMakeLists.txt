@@ -195,6 +195,28 @@ target_compile_options(cpu_input_contracts PRIVATE -fexceptions)
 add_dependencies(cpu_input_contracts LetAlgDialectIncGen)
 target_link_libraries(cpu_input_contracts PRIVATE SconeMLTestSpec MLIR MLIRExecutionEngine)
 
+function(add_gpu_input_contract_target target runtime)
+  add_llvm_executable(${target}
+    test/runner/GPUInputContracts.cpp
+    src/tensor/GPURunner.cpp
+    src/tensor/TensorFrontend.cpp
+    src/tensor/MetalLaunch.cpp
+    src/dialect/LetAlgDialect.cpp
+    ${runtime})
+  target_compile_options(${target} PRIVATE -fexceptions)
+  add_dependencies(${target} LetAlgDialectIncGen)
+  target_link_libraries(${target} PRIVATE
+    SconeMLTestSpec SconeMLTensorGPU SconeMLMetalExporter MLIR)
+endfunction()
+add_gpu_input_contract_target(gpu_input_contracts ${SCONEML_GPU_RUNTIME})
+if(APPLE)
+  target_link_libraries(gpu_input_contracts PRIVATE "-framework Foundation" "-framework Metal")
+else()
+  target_compile_definitions(gpu_input_contracts PRIVATE SCONEML_EXPECT_METAL_STUB)
+endif()
+add_gpu_input_contract_target(gpu_input_stub_contracts src/tensor/MetalRuntimeStub.cpp)
+target_compile_definitions(gpu_input_stub_contracts PRIVATE SCONEML_EXPECT_METAL_STUB)
+
 enable_testing()
 add_test(NAME compiler_suite COMMAND tester)
 add_test(NAME tensor_interfaces COMMAND tensor_interfaces
@@ -203,6 +225,10 @@ add_test(NAME tensor_interfaces COMMAND tensor_interfaces
 add_test(NAME metal_runtime_contracts COMMAND metal_runtime_checks)
 add_test(NAME metal_stub_contracts COMMAND metal_stub_checks)
 add_test(NAME cpu_input_contracts COMMAND cpu_input_contracts
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/external_input/polynomial.ml)
+add_test(NAME gpu_input_contracts COMMAND gpu_input_contracts
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/external_input/polynomial.ml)
+add_test(NAME gpu_input_stub_contracts COMMAND gpu_input_stub_contracts
   ${CMAKE_CURRENT_SOURCE_DIR}/test/external_input/polynomial.ml)
 add_test(NAME reference_fixtures COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate.py --check)
