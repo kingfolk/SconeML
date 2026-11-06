@@ -1,6 +1,7 @@
 #include "src/tensor/CPURunner.h"
 #include "src/tensor/TensorFrontend.h"
 #include "test/runner/TestSpec.h"
+#include "test/runner/InputOwnership.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <array>
@@ -27,7 +28,7 @@ int main(int argc, char **argv) {
   using sconeml::tensor::TensorArgument;
   using sconeml::tensor::runTensorCPU;
   try {
-    require(argc == 3, "usage: cpu_input_contracts <polynomial.ml> <alias.ml>");
+    require(argc == 5, "usage: cpu_input_contracts <polynomial.ml> <alias.ml> <lifetime.ml> <overlap.ml>");
     const auto test = readCase(argv[1]);
     const auto &first = test.runs.at(0).arguments->at(0);
     const auto &changed = test.runs.at(1).arguments->at(0);
@@ -90,6 +91,10 @@ int main(int argc, char **argv) {
             "CPU multi-input alias or binding contract failed");
     multiOutput.front() ^= 1;
     require(storage == before, "CPU multi-input output aliases input");
+
+    checkThreeInputOwnership(argv[3], argv[4], [](const auto &program, auto arguments) {
+      return runTensorCPU(program, arguments);
+    });
 
     // Synthetic size validation must not need an invalid span or huge allocation.
     mlir::MLIRContext context;

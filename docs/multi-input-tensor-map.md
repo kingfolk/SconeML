@@ -120,7 +120,8 @@ ctest --test-dir build --output-on-failure
 ./build/tester --suite test/multi_input --require-metal
 ./build/tester --require-metal
 ./build/tester --no-metal
-./build/gpu_input_contracts test/external_input/polynomial.ml test/multi_input/alias.ml
+./build/gpu_input_contracts test/external_input/polynomial.ml test/multi_input/alias.ml \
+  test/acceptance_m2/lifetime.ml test/acceptance_m2/overlap.ml
 ```
 
 On Apple M1 with LLVM/MLIR 22.1.8: the complete strict Metal suite passed 329
@@ -129,6 +130,8 @@ skipped 85 device runs. CTest passed 9/9. Direct real-device input alias and
 ownership contracts passed. The non-Apple stub is explicitly tested on macOS,
 which does not constitute a separate Linux platform validation.
 
-The broader generated/reference matrix and final M2 acceptance record remain
-M2-D work. This feature does not add general functions/imports, broadcasting,
+M2-D adds the broader generated/reference matrix and direct three-input
+lifetime/overlap contracts; see the [M2 acceptance record](m2-acceptance.md) for
+the final matrix, commands and observed results. The counts above describe the
+M2-C validation baseline. This feature does not add general functions/imports, broadcasting,
 more than three inputs, floating point, reductions, caches or async execution.
