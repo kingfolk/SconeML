@@ -212,3 +212,21 @@ expect_success(multi-metal-skip "1 skipped" --file "${DATA_ROOT}/multi_input/thr
 expect_failure(multi-metal-required "required device unavailable" --file "${DATA_ROOT}/multi_input/three-fma.ml" --run metal --no-metal --require-metal)
 expect_success(multi-empty "2 passed, 0 skipped" --file "${DATA_ROOT}/multi_input/three-empty.ml" --no-metal --require-metal)
 expect_success(multi-shape-before-skip "2 passed, 0 skipped" --file "${DATA_ROOT}/multi_input/errors/empty-mismatched.ml" --no-metal --require-metal)
+
+# M2-D: generated source fixtures use production APIs and retain real assertions.
+file(READ "${DATA_ROOT}/acceptance_m2/constant.ml" m2_case)
+string(REPLACE "@assert:cpu:result\n[2147483647," "@assert:cpu:result\n[2147483646," changed "${m2_case}")
+if(changed STREQUAL m2_case)
+  message(FATAL_ERROR "M2 assertion mutation did not change the fixture")
+endif()
+file(WRITE "${SCRATCH}/wrong-m2-result.ml" "${changed}")
+expect_failure(wrong-m2-result "first differing element [0]"
+  --file "${SCRATCH}/wrong-m2-result.ml" --run cpu)
+expect_success(m2-selected-compare "[cpu]"
+  --file "${DATA_ROOT}/acceptance_m2/matrix/k3-w32-n033.ml" --run metal --no-metal)
+expect_failure(m2-strict-device "required device unavailable"
+  --file "${DATA_ROOT}/acceptance_m2/matrix/k3-w32-n033.ml" --run metal --no-metal --require-metal)
+expect_success(m2-empty-no-device "3 passed, 0 skipped"
+  --file "${DATA_ROOT}/acceptance_m2/matrix/k3-w32-n000.ml" --no-metal --require-metal)
+expect_success(m2-errors-before-device "0 skipped, 0 failed"
+  --suite "${DATA_ROOT}/multi_input/errors" --no-metal --require-metal)
