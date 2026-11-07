@@ -12,6 +12,11 @@ map and an independent output, with wrapping constants/add/subtract/multiply.
 Both source runners use the shared frontend; the GPU runner uses explicit GPU
 IR, the independent Metal exporter and synchronous uniform dispatch.
 
+Later layout update: [thematic consolidation](test-layout.md) groups the five
+source cases into `source/literal-semantics.ml`, leaving 13 physical files with
+the same 17 logical cases and 46 runs. Counts below record the original F5
+validation.
+
 F5 adds 17 self-contained data files under `test/acceptance`, containing 46
 named runs. Existing source, verifier, effects, lowering, exporter and runtime
 checks remain active. No production source-language or execution API changed.

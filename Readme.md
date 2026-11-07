@@ -34,8 +34,10 @@ operations are rejected. The map itself declares an input read and an output
 write, so it is not treated as a pure operation by optimization passes.
 
 The [unified test runner](docs/testing.md) reads programs, pipeline configuration,
-and assertions from the same `.ml` or `.mlir` file. Run compiler tests without a
-GPU with `cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts gpu_input_contracts gpu_input_stub_contracts` followed by
+and assertions from the same `.ml` or `.mlir` file. Source test files can group
+independent programs with `(* @case NAME *)`; select one with `--case NAME`.
+The [test layout](docs/test-layout.md) groups related cases by purpose. Run compiler tests without a
+GPU with `cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts gpu_input_contracts gpu_input_stub_contracts grouped_spec_checks` followed by
 `./build/tester --no-metal`.
 
 An independent [GPU kernel extraction](docs/gpu-kernel-lowering.md) API converts
@@ -60,7 +62,7 @@ cmake -S . -B build \
   -DLLVM_DIR="$(brew --prefix llvm@22)/lib/cmake/llvm" \
   -DMLIR_DIR="$(brew --prefix llvm@22)/lib/cmake/mlir" \
   -DCMAKE_CXX_COMPILER="$(brew --prefix llvm@22)/bin/clang++"
-cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts gpu_input_contracts gpu_input_stub_contracts -j3
+cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts gpu_input_contracts gpu_input_stub_contracts grouped_spec_checks -j3
 ./build/tester --suite test/tensor --run cpu
 ```
 

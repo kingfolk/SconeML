@@ -82,10 +82,11 @@ template <typename T> T yaml(const std::string &text) {
 
 bool knownPipeline(const std::string &name) {
   static const std::set<std::string> names{
-      "verify",         "letalg",        "letalg-opt",          "tensor-scf",
-      "tensor-effects", "tensor-gpu-ir", "tensor-msl",          "metal-compile",
-      "tensor-cpu",     "scalar-cpu",    "tensor-metal",        "legacy-letalg",
-      "legacy-cpu", "tensor-cpu-ir", "tensor-metal-ir",
+      "verify",           "letalg",          "letalg-opt",
+      "tensor-scf",       "tensor-effects",  "tensor-gpu-ir",
+      "tensor-msl",       "metal-compile",   "tensor-cpu",
+      "scalar-cpu",       "tensor-metal",    "legacy-letalg",
+      "legacy-cpu",       "tensor-cpu-ir",   "tensor-metal-ir",
       "tensor-input-cpu", "tensor-input-ir", "tensor-input-metal"};
   return names.contains(name);
 }
@@ -170,7 +171,43 @@ std::string formatNumber(const Number &number) {
   return text + (number.tensor ? "]" : "");
 }
 
-TestCase parseCase(const std::string &path, const std::string &text) {
+namespace {
+// Scan source comments once per level. Nested comments and escaped strings are
+// opaque to case discovery; annotation payloads are comments too.
+size_t commentEnd(const std::string &text, size_t start) {
+  size_t depth = 1, position = start + 2;
+  while (position < text.size()) {
+    if (text.compare(position, 2, "(*") == 0) {
+      ++depth;
+      position += 2;
+    } else if (text.compare(position, 2, "*)") == 0) {
+      position += 2;
+      if (--depth == 0)
+        return position;
+    } else
+      ++position;
+  }
+  throw std::runtime_error(
+      "unterminated annotation comment at line " +
+      std::to_string(1 + std::count(text.begin(), text.begin() + start, '\n')));
+}
+
+bool sourceHasCode(const std::string &text) {
+  size_t position = 0;
+  while (position < text.size()) {
+    if (text.compare(position, 2, "(*") == 0)
+      position = commentEnd(text, position);
+    else if (llvm::StringRef(text).substr(position, 1).trim().empty())
+      ++position;
+    else
+      return true;
+  }
+  return false;
+}
+} // namespace
+
+static TestCase parseSingleCase(const std::string &path,
+                                const std::string &text) {
   std::vector<std::pair<std::string, std::string>> blocks;
   size_t position = 0;
   const bool ir = llvm::StringRef(path).ends_with(".mlir");
@@ -212,8 +249,7 @@ TestCase parseCase(const std::string &path, const std::string &text) {
       }
       if (text.compare(position, 2, "(*") != 0)
         break;
-      auto end = text.find("*)", position + 2);
-      require(end != std::string::npos, "unterminated annotation comment");
+      auto end = commentEnd(text, position) - 2;
       auto content = trim(text.substr(position + 2, end - position - 2));
       if (!content.empty() && content.front() == '@') {
         auto newline = content.find('\n');
@@ -232,7 +268,10 @@ TestCase parseCase(const std::string &path, const std::string &text) {
       std::string(std::count(text.begin(), text.begin() + position, '\n'),
                   '\n') +
       text.substr(position);
-  require(!trim(test.program).empty(), "missing test program");
+  test.programLine =
+      1 + std::count(text.begin(), text.begin() + position, '\n');
+  require(ir ? !trim(test.program).empty() : sourceHasCode(test.program),
+          "missing test program");
   std::optional<Config> config;
   bool legacy = false;
   for (const auto &[header, payload] : blocks) {
@@ -291,12 +330,13 @@ TestCase parseCase(const std::string &path, const std::string &text) {
     const bool sourceInputs = run.pipeline == "tensor-input-cpu" ||
                               run.pipeline == "tensor-input-ir" ||
                               run.pipeline == "tensor-input-metal";
-    require(!sourceInputs || (test.input == "source" && run.arguments.has_value()),
+    require(!sourceInputs ||
+                (test.input == "source" && run.arguments.has_value()),
             "external-input pipeline requires source input and arguments");
     require(!run.arguments || sourceInputs,
             "arguments is only supported by external-input pipelines");
-    const bool mapIR = run.pipeline == "tensor-cpu-ir" ||
-                       run.pipeline == "tensor-metal-ir";
+    const bool mapIR =
+        run.pipeline == "tensor-cpu-ir" || run.pipeline == "tensor-metal-ir";
     if (mapIR) {
       require(ir && test.tensorInput.has_value(),
               "IR execution requires mlir input and tensor-input");
@@ -309,7 +349,8 @@ TestCase parseCase(const std::string &path, const std::string &text) {
     require(!run.threadsPerThreadgroup || *run.threadsPerThreadgroup > 0,
             "threads-per-group must be positive");
     require(!run.threadsPerThreadgroup ||
-                *run.threadsPerThreadgroup <= std::numeric_limits<std::size_t>::max(),
+                *run.threadsPerThreadgroup <=
+                    std::numeric_limits<std::size_t>::max(),
             "threads-per-group exceeds host size range");
     if (run.pipeline == "tensor-cpu" || run.pipeline == "tensor-metal" ||
         run.pipeline == "scalar-cpu" || run.pipeline.starts_with("legacy-"))
@@ -353,9 +394,124 @@ TestCase parseCase(const std::string &path, const std::string &text) {
   return test;
 }
 
-TestCase readCase(const std::string &path) {
+std::vector<TestCase> parseCases(const std::string &path,
+                                 const std::string &text) {
+  if (llvm::StringRef(path).ends_with(".mlir"))
+    return {parseSingleCase(path, text)};
+  struct Marker {
+    size_t start, end;
+    std::string name;
+  };
+  std::vector<Marker> markers;
+  std::set<std::string> names;
+  bool preamble = true;
+  for (size_t position = 0; position < text.size();) {
+    if (text.compare(position, 2, "(*") == 0) {
+      const size_t end = commentEnd(text, position);
+      const auto content = trim(text.substr(position + 2, end - position - 4));
+      if (llvm::StringRef(content).starts_with("@case")) {
+        const auto name = trim(content.substr(5));
+        const size_t lineStart = text.rfind('\n', position);
+        const size_t lineEnd = text.find('\n', end);
+        const bool standalone =
+            trim(text.substr(lineStart == std::string::npos ? 0 : lineStart + 1,
+                             position - (lineStart == std::string::npos
+                                             ? 0
+                                             : lineStart + 1)))
+                .empty() &&
+            trim(text.substr(end, lineEnd == std::string::npos ? lineEnd
+                                                               : lineEnd - end))
+                .empty();
+        const bool validName =
+            !name.empty() &&
+            std::all_of(name.begin(), name.end(), [](unsigned char c) {
+              return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                     (c >= '0' && c <= '9') || c == '_' || c == '-';
+            });
+        const auto context =
+            path + "#" + name + ": line " +
+            std::to_string(
+                1 + std::count(text.begin(), text.begin() + position, '\n'));
+        require(standalone && content.size() > 5 &&
+                    (content[5] == ' ' || content[5] == '\t') &&
+                    content.find('\n') == std::string::npos && validName,
+                context + ": malformed @case marker");
+        require(!markers.empty() || preamble,
+                context + ": only whitespace and ordinary comments may precede "
+                          "first @case");
+        require(names.insert(name).second, context + ": duplicate case name");
+        markers.push_back({position, end, name});
+      } else if (!content.empty() && content.front() == '@' && markers.empty())
+        preamble = false;
+      position = end;
+    } else if (text[position] == '"') {
+      preamble = false;
+      ++position;
+      while (position < text.size()) {
+        if (text[position] == '\\')
+          position += std::min(size_t(2), text.size() - position);
+        else if (text[position++] == '"')
+          break;
+      }
+    } else {
+      if (!llvm::StringRef(text).substr(position, 1).trim().empty())
+        preamble = false;
+      ++position;
+    }
+  }
+  if (markers.empty())
+    return {parseSingleCase(path, text)};
+  std::vector<TestCase> tests;
+  for (size_t i = 0; i < markers.size(); ++i) {
+    const auto &marker = markers[i];
+    const size_t end =
+        i + 1 < markers.size() ? markers[i + 1].start : text.size();
+    // Prefix blank lines preserve physical source positions for every consumer.
+    auto chunk =
+        std::string(std::count(text.begin(), text.begin() + marker.end, '\n'),
+                    '\n') +
+        text.substr(marker.end, end - marker.end);
+    try {
+      auto test = parseSingleCase(path, chunk);
+      require(std::none_of(test.runs.begin(), test.runs.end(),
+                           [](const Run &run) {
+                             return run.pipeline.starts_with("legacy-");
+                           }),
+              "named cases require version-1 @test configuration");
+      test.name = marker.name;
+      tests.push_back(std::move(test));
+    } catch (const std::exception &error) {
+      throw std::runtime_error(path + "#" + marker.name + ": " + error.what());
+    }
+  }
+  return tests;
+}
+
+static TestCase selectCase(std::vector<TestCase> tests,
+                           const std::string &name) {
+  if (name.empty()) {
+    require(tests.size() == 1,
+            "multi-case file requires an explicit case selection");
+    return std::move(tests.front());
+  }
+  for (auto &test : tests)
+    if (test.name == name)
+      return std::move(test);
+  throw std::runtime_error("case not found: " + name);
+}
+
+TestCase parseCase(const std::string &path, const std::string &text,
+                   const std::string &name) {
+  return selectCase(parseCases(path, text), name);
+}
+
+std::vector<TestCase> readCases(const std::string &path) {
   auto buffer = llvm::MemoryBuffer::getFile(path);
   require(bool(buffer), "cannot read test file: " + path);
-  return parseCase(path, (*buffer)->getBuffer().str());
+  return parseCases(path, (*buffer)->getBuffer().str());
+}
+
+TestCase readCase(const std::string &path, const std::string &name) {
+  return selectCase(readCases(path), name);
 }
 } // namespace sconeml::test

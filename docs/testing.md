@@ -2,11 +2,15 @@
 
 `tester` reads each test's program, configuration, and assertions from one file. `.ml` files contain source programs; `.mlir` files contain raw IR. The runner calls production frontend, lowering, exporter, and execution code through a fixed set of pipeline adapters.
 
+The [source test layout](test-layout.md) indexes thematic files, case counts and
+selection examples. Related regressions should normally become named cases in
+the matching file.
+
 ## Running tests
 
 ```sh
 cmake -S . -B build
-cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts gpu_input_contracts gpu_input_stub_contracts -j3
+cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts gpu_input_contracts gpu_input_stub_contracts grouped_spec_checks -j3
 ctest --test-dir build --output-on-failure
 ```
 
@@ -22,7 +26,7 @@ The runner defaults to the project's `test` directory, independent of the workin
 ./build/tester --run compile --require-metal
 ```
 
-`--file` accepts an existing path, a unique basename, or a suite-relative path. `--run` selects an exact run name; comparison dependencies are automatically included. Missing files/runs, ambiguous basenames, empty suites, bad configuration, and failed assertions exit nonzero.
+`--file` accepts an existing path, a unique basename, or a suite-relative path. `--case` selects an exact named source case within those files. `--run` selects an exact run name; comparison dependencies are automatically included. Missing files/cases/runs, ambiguous basenames, empty suites, bad configuration, and failed assertions exit nonzero.
 
 Metal availability is decided per run. A skipped device run does not skip CPU/IR assertions in the same file. `--no-metal` forces the unavailable-device path for testing; `--require-metal` turns device skips into failures. Combining them deliberately tests strict-device failure without requiring special hardware. An unimplemented pipeline is a configuration error, never a device skip.
 
@@ -55,6 +59,88 @@ let ts = [1, 2, 3] in ts * ts + 2 * ts + 1
 Every run starts with its own context and newly translated/parsed module. Destructive optimization or lowering in one run cannot affect another.
 
 `version`, `input`, and `runs` are required YAML fields. Each run has `name` and `pipeline`, plus optional positive `threads-per-group` for `tensor-metal` or `tensor-metal-ir`. Omitting the width selects the runtime default. Unknown/duplicate YAML fields, duplicate names or assertion kinds, assertions for unknown runs, empty programs, and missing assertions fail validation before execution. Assertion kinds must be supported by their pipeline. Arbitrary shell commands and pass scripts are not supported.
+
+## Multiple source cases in one file
+
+A standalone top-level `(* @case NAME *)` line starts a named case and ends the
+previous one. For example, `arithmetic.ml` can contain:
+
+```ocaml
+(* @case add *)
+(* @test
+version: 1
+input: source
+runs:
+  - name: cpu
+    pipeline: tensor-input-cpu
+    arguments:
+      - name: a
+        values: [2, 3]
+*)
+(* @assert:cpu:result
+[3, 4]
+*)
+a + 1
+
+(* @case square *)
+(* @test
+version: 1
+input: source
+runs:
+  - name: cpu
+    pipeline: tensor-input-cpu
+    arguments:
+      - name: a
+        values: [4, 5]
+*)
+(* @assert:cpu:result
+[16, 25]
+*)
+a * a
+```
+
+Each case owns its complete version-1 configuration, source, inputs and
+assertions. Repeated run names are allowed across cases. Comparisons reference
+only earlier numeric runs in that case; cross-case references and shared source
+bindings are unsupported. Every run still creates its own compiler context and
+module.
+
+Names are nonempty ASCII letters, digits, underscores or hyphens, unique within
+a file. Only whitespace and ordinary comments may precede the first marker.
+Anonymous programs/annotations mixed with named blocks, malformed markers,
+empty/comment-only programs, missing metadata and duplicate names fail validation.
+Discovery respects nested comments, annotation payloads, strings and escaped
+quotes; marker-like text inside them does not create a case. This lexical
+handling does not extend the production source grammar.
+
+```sh
+./build/tester --file arithmetic.ml
+./build/tester --file arithmetic.ml --case square --run cpu
+./build/tester --suite test/acceptance_m2 --case w32-n033 --run metal --require-metal
+./build/tester --file test/acceptance_m2/matrix/three-input-launch-boundaries.ml --case w32-n000 --no-metal --require-metal
+```
+
+Case selection matches the same exact name across multiple files in a suite.
+Comparison dependencies are automatically included locally. All cases in selected
+files are validated before any pipeline runs, even if excluded by `--case`,
+`--run` or device policy. Missing selections fail. Execution/assertion failures
+identify `absolute/path.ml#case [run]` and the physical source start line; other
+valid cases continue. The summary reports selected physical files, logical cases
+and actual runs (including comparison dependencies) separately.
+
+Original line prefixes are retained in source strings. Existing source frontends
+use unknown MLIR locations and some syntax errors have no token location; the
+runner reports the source start line without inventing a precise failing-token
+position. Configuration failures include the file/case identity.
+
+Ungrouped source files retain version-1 and legacy behavior. `.mlir` files retain
+their single-module format. C++ consumers use `readCases`/`parseCases` for all
+cases; `readCase`/`parseCase` reject multiple cases unless an exact case name is
+supplied as the optional final argument. They validate the whole file before
+selecting. `grouped_spec_contracts` checks lexical discovery, source offsets and
+reader behavior without linking a compiler or GPU runtime. `runner_contracts`
+checks selection, independent inputs/results, failure continuation, prevalidation,
+and strict/empty/error device policies. See [M3-T acceptance](m3-t-acceptance.md).
 
 ## IR format
 
@@ -94,7 +180,7 @@ An `ir-equal` or `text-equal` block contains the complete expected output, using
 | `scalar-cpu` | Scalar source lowering and CPU JIT; typed scalar result |
 | `tensor-metal` | Production GPU runner: frontend, GPU IR extraction, MSL export and synchronous Metal dispatch; tensor result and actual executed MSL |
 
-Legacy `@letalg:opt` and `@runner:cpu` blocks continue to run unchanged. Their implicit `legacy-letalg`/`legacy-cpu` adapters preserve the previous scope/closure pipeline, function representation, exact-text matching, and scalar results. They do not silently add canonicalization. Legacy and version-1 metadata cannot be mixed in one file.
+Legacy `@letalg:opt` and `@runner:cpu` blocks continue to run unchanged. Their implicit `legacy-letalg`/`legacy-cpu` adapters preserve the previous scope/closure pipeline, function representation, exact-text matching, and scalar results. They do not silently add canonicalization. Legacy and version-1 metadata cannot be mixed in one case; named cases require version-1 metadata.
 
 `tensor-metal` replaces the former `tensor-metal-legacy` adapter after runtime integration. Existing tensor execution cases now exercise the new exporter path. For dispatch boundaries see `test/tensor/dispatch`: a width of 4 is configured alongside the program and expected result in each file.
 
@@ -174,7 +260,7 @@ fixtures and does not keep a second C++ table of compiler examples.
 | Kind | Meaning |
 | --- | --- |
 | `result` | An i32 scalar or i32 array, parsed and compared by value and kind; `4` is not `[4]` |
-| `compare` | Equal numeric result to an earlier numeric run in the same file |
+| `compare` | Equal numeric result to an earlier numeric run in the same case |
 | `ir-equal` | Parse and verify expected and actual IR, compare operations/types/attributes and SSA correspondence, ignoring locations and printed names |
 | `ir-check` | LLVM FileCheck directives applied to emitted IR |
 | `text-equal` | Full output equality after outer whitespace trimming, retaining the old exact-text convention |
@@ -231,7 +317,10 @@ all-input capacity checks and valid empty two/three-input calls on real/stub API
 ## M2 independent acceptance matrix
 
 `test/acceptance_m2` contains 70 self-contained production-source cases (207
-runs) generated by `test/reference/generate_m2.py`. Each file contains named
+runs) in seven physical files generated by `test/reference/generate_m2.py`.
+The matrix files `matrix/single-input-launch-boundaries.ml`, `matrix/two-input-launch-boundaries.ml`, and `matrix/three-input-launch-boundaries.ml` each contain
+22 named cases. The four ownership/semantics fixtures remain standalone for
+direct API consumers. Each case contains named
 host arrays, its expression, explicit/default launch settings, independent
 expected arrays and CPU/Metal comparisons. The runner reads these directly;
 Python is needed for fixture reproducibility, not ordinary execution.

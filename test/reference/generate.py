@@ -211,6 +211,10 @@ message: tensor literal cannot be empty
 *)
 let xs = [] in xs
 """
+    source_cases = ['add', 'sub', 'square', 'polynomial', 'empty-rejected']
+    result['source/literal-semantics.ml'] = '\n'.join(
+        f'(* @case {name} *)\n' + result.pop(f'source/{name}.ml').rstrip('\n') + '\n'
+        for name in source_cases)
     return result
 
 

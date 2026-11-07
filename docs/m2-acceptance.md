@@ -87,6 +87,10 @@ dependencies, required-device failure, empty success without a device, and all
 multi-input frontend errors under strict no-device mode. Fixture reproducibility
 runs under CTest and the existing PR CI workflow.
 
+Later fixture-layout update: [M3-T acceptance](m3-t-acceptance.md) consolidates
+the generated matrix into three grouped files while preserving all 70 logical
+cases and 207 runs. The file counts below describe the original M2-D validation.
+
 ## Local validation
 
 Environment: Apple M1, arm64, macOS 15.5, LLVM/MLIR 22.1.8,
