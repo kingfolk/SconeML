@@ -62,15 +62,16 @@ int main(int argc, char **argv) {
   try {
     llvm::InitializeNativeTarget();
     llvm::InitializeNativeTargetAsmPrinter();
-    std::string root = SCONEML_TEST_ROOT, file, selectedRun;
+    std::string root = SCONEML_TEST_ROOT, file, selectedRun, selectedCase;
     bool disableMetal = false, requireMetal = false;
     for (int i = 1; i < argc; ++i) {
       std::string argument = argv[i];
       if (argument == "--file" || argument == "--suite" ||
-          argument == "--run") {
+          argument == "--run" || argument == "--case") {
         require(i + 1 < argc, "missing value for " + argument);
         (argument == "--file"    ? file
          : argument == "--suite" ? root
+         : argument == "--case"  ? selectedCase
                                  : selectedRun) = argv[++i];
       } else if (argument == "--no-metal")
         disableMetal = true;
@@ -90,7 +91,7 @@ int main(int argc, char **argv) {
             (extension == ".ml" || extension == ".mlir") &&
             (file.empty() || entry.path().filename() == file ||
              entry.path().lexically_relative(root) == file))
-          files.push_back(entry.path());
+          files.push_back(fs::absolute(entry.path()));
       }
       if (!file.empty())
         require(files.size() == 1, "file not found or ambiguous: " + file);
@@ -102,19 +103,39 @@ int main(int argc, char **argv) {
     std::vector<TestCase> tests;
     for (const auto &path : files) {
       try {
-        tests.push_back(readCase(path.string()));
+        auto cases = readCases(path.string());
+        for (auto &test : cases)
+          tests.push_back(std::move(test));
       } catch (const std::exception &error) {
         throw std::runtime_error(path.string() + ": config: " + error.what());
       }
     }
-    unsigned passed = 0, skipped = 0, failed = 0, selected = 0;
+    // Resolve selections before execution, after validating all metadata.
+    bool caseFound = selectedCase.empty(), runFound = selectedRun.empty();
+    for (const auto &test : tests)
+      if (selectedCase.empty() || test.name == selectedCase) {
+        caseFound = true;
+        for (const auto &run : test.runs)
+          if (run.name == selectedRun)
+            runFound = true;
+      }
+    require(caseFound, "case not found: " + selectedCase);
+    require(runFound, "run not found: " + selectedRun);
+    unsigned passed = 0, skipped = 0, failed = 0, selected = 0, cases = 0;
+    std::set<std::string> executedFiles;
     for (const auto &test : tests) {
+      if (!selectedCase.empty() && test.name != selectedCase)
+        continue;
       std::set<std::string> wanted;
       for (const auto &run : test.runs)
         if (selectedRun.empty() || run.name == selectedRun) {
           wanted.insert(run.name);
           ++selected;
         }
+      if (!wanted.empty()) {
+        ++cases;
+        executedFiles.insert(test.path);
+      }
       // Include earlier numeric comparison dependencies when selecting one run.
       for (auto it = test.runs.rbegin(); it != test.runs.rend(); ++it)
         if (wanted.contains(it->name))
@@ -144,18 +165,19 @@ int main(int argc, char **argv) {
             require(!requireMetal,
                     "required device unavailable: " + output.diagnostic);
             ++skipped;
-            llvm::outs() << "SKIP " << test.path << " [" << run.name
+            llvm::outs() << "SKIP " << test.id() << " [" << run.name
                          << "]: " << output.diagnostic << '\n';
           } else {
             checkAssertions(test, run, output, outputs);
             ++passed;
-            llvm::outs() << "PASS " << test.path << " [" << run.name << "]\n";
+            llvm::outs() << "PASS " << test.id() << " [" << run.name << "]\n";
           }
         } catch (const std::exception &error) {
           ++failed;
           output.success = false;
-          llvm::errs() << "FAIL " << test.path << " [" << run.name
-                       << "]: " << error.what() << '\n';
+          llvm::errs() << "FAIL " << test.id() << " [" << run.name
+                       << "]: source starts at line " << test.programLine
+                       << ": " << error.what() << '\n';
         }
         outputs.emplace(run.name, std::move(output));
       }
@@ -163,6 +185,8 @@ int main(int argc, char **argv) {
     require(selected != 0, "run not found: " + selectedRun);
     llvm::outs() << "Tests: " << passed << " passed, " << skipped
                  << " skipped, " << failed << " failed\n";
+    llvm::outs() << "Selection: " << executedFiles.size() << " files, " << cases
+                 << " cases, " << passed + skipped + failed << " runs\n";
     return failed ? 1 : 0;
   } catch (const std::exception &error) {
     llvm::errs() << "FAIL: " << error.what() << '\n';

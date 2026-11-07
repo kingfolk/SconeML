@@ -3,6 +3,24 @@ if(NOT DEFINED RUNNER OR NOT DEFINED DATA_ROOT OR NOT DEFINED SCRATCH)
   message(FATAL_ERROR "RUNNER, DATA_ROOT and SCRATCH are required")
 endif()
 file(MAKE_DIRECTORY "${SCRATCH}" "${SCRATCH}/empty")
+# These mutations need one complete case from a known grouped fixture. Preserve
+# the original metadata/program, without importing unrelated sibling cases.
+function(read_source_case path name output)
+  file(READ "${path}" contents)
+  set(marker "(* @case ${name} *)\n")
+  string(FIND "${contents}" "${marker}" start)
+  if(start EQUAL -1)
+    message(FATAL_ERROR "Missing fixture case: ${path}#${name}")
+  endif()
+  string(LENGTH "${marker}" marker_length)
+  math(EXPR start "${start} + ${marker_length}")
+  string(SUBSTRING "${contents}" ${start} -1 payload)
+  string(FIND "${payload}" "\n(* @case " end)
+  if(NOT end EQUAL -1)
+    string(SUBSTRING "${payload}" 0 ${end} payload)
+  endif()
+  set(${output} "${payload}" PARENT_SCOPE)
+endfunction()
 function(expect_failure label expected)
   execute_process(COMMAND "${RUNNER}" ${ARGN}
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors)
@@ -202,16 +220,16 @@ expect_failure(missing-arguments "requires source input and arguments" --file "$
 expect_success(external-metal-skip "1 skipped" --file "${DATA_ROOT}/external_input/polynomial.ml" --run gpu-first --no-metal)
 expect_failure(external-metal-required "required device unavailable" --file "${DATA_ROOT}/external_input/polynomial.ml" --run gpu-first --no-metal --require-metal)
 expect_success(external-metal-empty "2 passed, 0 skipped" --file "${DATA_ROOT}/external_input/identity.ml" --run gpu-empty --no-metal --require-metal)
-expect_success(external-metal-invalid-expression "1 passed, 0 skipped" --file "${DATA_ROOT}/external_input/errors/empty-unknown.ml" --run gpu-rejected --no-metal --require-metal)
-expect_success(external-metal-invalid-width "2 passed, 0 skipped" --file "${DATA_ROOT}/external_input/metal/invalid-width.ml" --no-metal --require-metal)
+expect_success(external-metal-invalid-expression "1 passed, 0 skipped" --file "${DATA_ROOT}/external_input/errors/empty-input-validation.ml" --case empty-unknown --run gpu-rejected --no-metal --require-metal)
+expect_success(external-metal-invalid-width "2 passed, 0 skipped" --file "${DATA_ROOT}/external_input/metal/launch-validation.ml" --case invalid-width --no-metal --require-metal)
 message(STATUS "Runner configuration, assertion, launch and source/IR input device-policy contracts passed")
 
 # Multi-input source calls remain data-driven and retain strict device policy.
-expect_success(multi-cpu "1 passed" --file "${DATA_ROOT}/multi_input/three-fma.ml" --run cpu)
-expect_success(multi-metal-skip "1 skipped" --file "${DATA_ROOT}/multi_input/three-fma.ml" --run metal --no-metal)
-expect_failure(multi-metal-required "required device unavailable" --file "${DATA_ROOT}/multi_input/three-fma.ml" --run metal --no-metal --require-metal)
-expect_success(multi-empty "2 passed, 0 skipped" --file "${DATA_ROOT}/multi_input/three-empty.ml" --no-metal --require-metal)
-expect_success(multi-shape-before-skip "2 passed, 0 skipped" --file "${DATA_ROOT}/multi_input/errors/empty-mismatched.ml" --no-metal --require-metal)
+expect_success(multi-cpu "1 passed" --file "${DATA_ROOT}/multi_input/arithmetic-and-binding.ml" --case three-fma --run cpu)
+expect_success(multi-metal-skip "1 skipped" --file "${DATA_ROOT}/multi_input/arithmetic-and-binding.ml" --case three-fma --run metal --no-metal)
+expect_failure(multi-metal-required "required device unavailable" --file "${DATA_ROOT}/multi_input/arithmetic-and-binding.ml" --case three-fma --run metal --no-metal --require-metal)
+expect_success(multi-empty "2 passed, 0 skipped" --file "${DATA_ROOT}/multi_input/empty-inputs.ml" --case three-empty --no-metal --require-metal)
+expect_success(multi-shape-before-skip "2 passed, 0 skipped" --file "${DATA_ROOT}/multi_input/errors/length-validation.ml" --case empty-mismatched --no-metal --require-metal)
 
 # M2-D: generated source fixtures use production APIs and retain real assertions.
 file(READ "${DATA_ROOT}/acceptance_m2/constant.ml" m2_case)
@@ -223,10 +241,105 @@ file(WRITE "${SCRATCH}/wrong-m2-result.ml" "${changed}")
 expect_failure(wrong-m2-result "first differing element [0]"
   --file "${SCRATCH}/wrong-m2-result.ml" --run cpu)
 expect_success(m2-selected-compare "[cpu]"
-  --file "${DATA_ROOT}/acceptance_m2/matrix/k3-w32-n033.ml" --run metal --no-metal)
+  --file "${DATA_ROOT}/acceptance_m2/matrix/three-input-launch-boundaries.ml" --case w32-n033 --run metal --no-metal)
 expect_failure(m2-strict-device "required device unavailable"
-  --file "${DATA_ROOT}/acceptance_m2/matrix/k3-w32-n033.ml" --run metal --no-metal --require-metal)
+  --file "${DATA_ROOT}/acceptance_m2/matrix/three-input-launch-boundaries.ml" --case w32-n033 --run metal --no-metal --require-metal)
 expect_success(m2-empty-no-device "3 passed, 0 skipped"
-  --file "${DATA_ROOT}/acceptance_m2/matrix/k3-w32-n000.ml" --no-metal --require-metal)
+  --file "${DATA_ROOT}/acceptance_m2/matrix/three-input-launch-boundaries.ml" --case w32-n000 --no-metal --require-metal)
 expect_success(m2-errors-before-device "0 skipped, 0 failed"
   --suite "${DATA_ROOT}/multi_input/errors" --no-metal --require-metal)
+
+# Grouped source cases: reuse run names without sharing programs or results.
+set(add [=[(* @case add *)
+(* @test
+version: 1
+input: source
+runs:
+  - name: cpu
+    pipeline: tensor-input-cpu
+    arguments:
+      - name: a
+        values: [2, 3]
+  - name: metal
+    pipeline: tensor-input-metal
+    arguments:
+      - name: a
+        values: [2, 3]
+*)
+(* @assert:cpu:result
+[3, 4]
+*)
+(* @assert:metal:result
+[3, 4]
+*)
+(* @assert:metal:compare
+cpu
+*)
+a + 1
+]=])
+string(REPLACE "@case add" "@case square" square "${add}")
+string(REPLACE "values: [2, 3]" "values: [4, 5]" square "${square}")
+string(REPLACE "[3, 4]" "[16, 25]" square "${square}")
+string(REPLACE "a + 1" "a * a" square "${square}")
+file(WRITE "${SCRATCH}/grouped.ml" "${add}\n${square}")
+expect_success(grouped-all "2 cases, 4 runs" --file "${SCRATCH}/grouped.ml" --no-metal)
+expect_success(grouped-cpu "2 passed, 0 skipped, 0 failed" --file "${SCRATCH}/grouped.ml" --run cpu)
+expect_success(grouped-case "1 cases, 2 runs" --file "${SCRATCH}/grouped.ml" --case square --no-metal)
+expect_success(grouped-compare "1 passed, 1 skipped, 0 failed" --file "${SCRATCH}/grouped.ml" --case square --run metal --no-metal)
+expect_success(grouped-identity "grouped.ml#square [cpu]" --file "${SCRATCH}/grouped.ml" --case square --run metal --no-metal)
+expect_failure(grouped-strict "required device unavailable" --file "${SCRATCH}/grouped.ml" --case square --run metal --no-metal --require-metal)
+expect_failure(grouped-missing-case "case not found" --file "${SCRATCH}/grouped.ml" --case absent)
+expect_failure(grouped-missing-run "run not found" --file "${SCRATCH}/grouped.ml" --case square --run absent)
+expect_failure(ungrouped-missing-case "case not found" --file "${SCRATCH}/valid.ml" --case square)
+
+# A later failure is reported and does not hide either surrounding valid case.
+string(REPLACE "[16, 25]" "[16, 24]" wrong_square "${square}")
+string(REPLACE "@case add" "@case last" last "${add}")
+file(WRITE "${SCRATCH}/grouped-wrong.ml" "${add}\n${wrong_square}\n${last}")
+expect_failure(grouped-later-result "2 passed, 0 skipped, 1 failed" --file "${SCRATCH}/grouped-wrong.ml" --run cpu)
+expect_failure(grouped-error-identity "grouped-wrong.ml#square [cpu]: source starts at line" --file "${SCRATCH}/grouped-wrong.ml" --run cpu)
+expect_failure(grouped-continues "PASS ${SCRATCH}/grouped-wrong.ml#last [cpu]" --file "${SCRATCH}/grouped-wrong.ml" --run cpu)
+
+function(expect_config_failure label expected)
+  execute_process(COMMAND "${RUNNER}" ${ARGN}
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors)
+  string(FIND "${output}${errors}" "${expected}" found)
+  string(FIND "${output}${errors}" "PASS " passed)
+  if(result EQUAL 0 OR found EQUAL -1 OR NOT passed EQUAL -1)
+    message(FATAL_ERROR "${label}: invalid metadata executed or wrong rejection\n${output}${errors}")
+  endif()
+endfunction()
+string(REPLACE "pipeline: tensor-input-metal" "pipeline: bad" invalid_square "${square}")
+file(WRITE "${SCRATCH}/grouped-invalid.ml" "${add}\n${invalid_square}")
+expect_config_failure(grouped-prevalidate "grouped-invalid.ml#square: unknown pipeline"
+  --file "${SCRATCH}/grouped-invalid.ml" --case add --run cpu --no-metal)
+file(WRITE "${SCRATCH}/grouped-duplicate.ml" "${add}\n${add}")
+expect_config_failure(grouped-duplicate "duplicate case name" --file "${SCRATCH}/grouped-duplicate.ml")
+file(WRITE "${SCRATCH}/grouped-anonymous.ml" "${valid}\n${add}")
+expect_config_failure(grouped-anonymous "precede first @case" --file "${SCRATCH}/grouped-anonymous.ml")
+file(WRITE "${SCRATCH}/grouped-empty.ml" "${add}\n(* @case empty *)\n")
+expect_config_failure(grouped-empty "#empty: missing test program" --file "${SCRATCH}/grouped-empty.ml")
+string(REPLACE "\ncpu\n" "\nadd/cpu\n" cross_square "${square}")
+file(WRITE "${SCRATCH}/grouped-cross.ml" "${add}\n${cross_square}")
+expect_config_failure(grouped-cross "compare must reference an earlier run: add/cpu"
+  --file "${SCRATCH}/grouped-cross.ml" --case add --no-metal)
+string(REPLACE "name: cpu" "name: other" cross_square "${square}")
+string(REPLACE "@assert:cpu:" "@assert:other:" cross_square "${cross_square}")
+file(WRITE "${SCRATCH}/grouped-cross-run.ml" "${add}\n${cross_square}")
+expect_config_failure(grouped-cross-run "compare must reference an earlier run: cpu"
+  --file "${SCRATCH}/grouped-cross-run.ml" --no-metal)
+string(REPLACE "a * a" "b * b" unbound_square "${square}")
+file(WRITE "${SCRATCH}/grouped-unbound.ml" "${add}\n${unbound_square}")
+expect_failure(grouped-unbound "unknown tensor expression variable: b" --file "${SCRATCH}/grouped-unbound.ml" --run cpu)
+
+file(MAKE_DIRECTORY "${SCRATCH}/grouped-suite")
+file(WRITE "${SCRATCH}/grouped-suite/one.ml" "${add}\n${square}")
+file(WRITE "${SCRATCH}/grouped-suite/two.ml" "${square}")
+expect_success(grouped-suite-selection "2 files, 2 cases, 2 runs" --suite "${SCRATCH}/grouped-suite" --case square --run cpu)
+
+# Empty runs and frontend errors remain strict-device successes per grouped case.
+read_source_case("${DATA_ROOT}/multi_input/empty-inputs.ml" "three-empty" empty_case)
+read_source_case("${DATA_ROOT}/multi_input/errors/length-validation.ml" "empty-mismatched" error_case)
+file(WRITE "${SCRATCH}/grouped-no-device.ml" "(* @case empty *)\n${empty_case}\n(* @case error *)\n${error_case}")
+expect_success(grouped-no-device "4 passed, 0 skipped, 0 failed" --file "${SCRATCH}/grouped-no-device.ml" --no-metal --require-metal)
+message(STATUS "Grouped case selection, isolation, validation and device-policy contracts passed")

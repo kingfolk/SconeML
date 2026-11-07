@@ -217,7 +217,13 @@ endif()
 add_gpu_input_contract_target(gpu_input_stub_contracts src/tensor/MetalRuntimeStub.cpp)
 target_compile_definitions(gpu_input_stub_contracts PRIVATE SCONEML_EXPECT_METAL_STUB)
 
+add_executable(grouped_spec_checks test/runner/GroupedSpecChecks.cpp)
+target_compile_options(grouped_spec_checks PRIVATE -fexceptions)
+target_link_libraries(grouped_spec_checks PRIVATE SconeMLTestSpec)
+
 enable_testing()
+add_test(NAME grouped_spec_contracts COMMAND grouped_spec_checks
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/acceptance_m2/matrix/single-input-launch-boundaries.ml)
 add_test(NAME compiler_suite COMMAND tester)
 add_test(NAME tensor_interfaces COMMAND tensor_interfaces
   ${CMAKE_CURRENT_SOURCE_DIR}/test/tensor/polynomial.ml

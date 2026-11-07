@@ -115,6 +115,7 @@ def fixtures():
     output = {}
     for arity in (1, 2, 3):
         expression, ops, result = program(arity)
+        grouped = []
         for width in (1, 4, 32, 256):
             for length in sorted({0, 1, width - 1, width, width + 1, 2 * width + 1}):
                 values = arrays(arity, length, SEED + arity * 1000 + length)
@@ -123,8 +124,10 @@ def fixtures():
                 runs = [('cpu', 'tensor-input-cpu', values, None),
                         ('metal', 'tensor-input-metal', values, width),
                         ('metal-auto', 'tensor-input-metal', values, None)]
-                output[f'matrix/k{arity}-w{width}-n{length:03d}.ml'] = case(
-                    expression, ops, result, runs)
+                grouped.append(f'(* @case w{width}-n{length:03d} *)\n' + case(
+                    expression, ops, result, runs))
+        arity_name = {1: 'single', 2: 'two', 3: 'three'}[arity]
+        output[f'matrix/{arity_name}-input-launch-boundaries.ml'] = '\n'.join(grouped)
 
     # Unused arguments must still determine/validate length and occupy ABI slots.
     values = arrays(3, 9, SEED)
