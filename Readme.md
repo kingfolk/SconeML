@@ -37,7 +37,7 @@ The [unified test runner](docs/testing.md) reads programs, pipeline configuratio
 and assertions from the same `.ml` or `.mlir` file. Source test files can group
 independent programs with `(* @case NAME *)`; select one with `--case NAME`.
 The [test layout](docs/test-layout.md) groups related cases by purpose. Run compiler tests without a
-GPU with `cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts gpu_input_contracts gpu_input_stub_contracts grouped_spec_checks` followed by
+GPU with `cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts gpu_input_contracts gpu_input_stub_contracts grouped_spec_checks shaped_cpu_contracts` followed by
 `./build/tester --no-metal`.
 
 An independent [GPU kernel extraction](docs/gpu-kernel-lowering.md) API converts
@@ -62,7 +62,7 @@ cmake -S . -B build \
   -DLLVM_DIR="$(brew --prefix llvm@22)/lib/cmake/llvm" \
   -DMLIR_DIR="$(brew --prefix llvm@22)/lib/cmake/mlir" \
   -DCMAKE_CXX_COMPILER="$(brew --prefix llvm@22)/bin/clang++"
-cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts gpu_input_contracts gpu_input_stub_contracts grouped_spec_checks -j3
+cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts gpu_input_contracts gpu_input_stub_contracts grouped_spec_checks shaped_cpu_contracts -j3
 ./build/tester --suite test/tensor --run cpu
 ```
 
@@ -84,8 +84,9 @@ and `metal-compile` also allow checking export and compilation independently.
 The GPU runner currently accepts a top-level tensor literal expression with one
 tensor map; it extracts the literal values from the translated IR. Other
 platforms keep the CPU test active and use a GPU runtime stub until a CUDA,
-ROCm, or SPIR-V backend is added. Multidimensional tensors and reductions are
-future work.
+ROCm, or SPIR-V backend is added. Shaped rank-1/rank-2 execution is available on CPU through the
+[shaped tensor API](docs/shaped-tensor-cpu.md). Shaped GPU execution and reductions
+remain future work.
 
 The [M1 acceptance matrix](docs/m1-acceptance.md) adds an independent 32-bit
 reference, reproducible source/IR fixtures and real CPU/Metal result checks.

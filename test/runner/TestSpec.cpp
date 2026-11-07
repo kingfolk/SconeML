@@ -28,6 +28,7 @@ template <> struct MappingTraits<sconeml::test::InputArgument> {
   static void mapping(IO &io, sconeml::test::InputArgument &argument) {
     io.mapRequired("name", argument.name);
     io.mapRequired("values", argument.values);
+    io.mapOptional("shape", argument.shape);
   }
 };
 template <> struct MappingTraits<sconeml::test::Run> {
@@ -87,7 +88,8 @@ bool knownPipeline(const std::string &name) {
       "tensor-msl",       "metal-compile",   "tensor-cpu",
       "scalar-cpu",       "tensor-metal",    "legacy-letalg",
       "legacy-cpu",       "tensor-cpu-ir",   "tensor-metal-ir",
-      "tensor-input-cpu", "tensor-input-ir", "tensor-input-metal"};
+      "tensor-input-cpu", "tensor-input-ir", "tensor-input-metal",
+      "shaped-input-ir", "shaped-input-cpu"};
   return names.contains(name);
 }
 
@@ -95,10 +97,16 @@ static bool numericPipeline(const std::string &pipeline) {
   return pipeline == "tensor-cpu" || pipeline == "scalar-cpu" ||
          pipeline == "legacy-cpu" || pipeline == "tensor-metal" ||
          pipeline == "tensor-cpu-ir" || pipeline == "tensor-metal-ir" ||
-         pipeline == "tensor-input-cpu" || pipeline == "tensor-input-metal";
+         pipeline == "tensor-input-cpu" || pipeline == "tensor-input-metal" ||
+         pipeline == "shaped-input-cpu";
 }
 
 static bool supports(const std::string &pipeline, const std::string &kind) {
+  if (kind == "shape")
+    return pipeline == "shaped-input-cpu";
+  if ((kind == "ir-check" || kind == "ir-equal") &&
+      (pipeline == "shaped-input-ir" || pipeline == "shaped-input-cpu"))
+    return true;
   if (kind == "entrypoint")
     return pipeline == "tensor-msl" || pipeline == "metal-compile" ||
            pipeline == "tensor-metal-ir";
@@ -123,6 +131,14 @@ static bool supports(const std::string &pipeline, const std::string &kind) {
          pipeline == "metal-compile" || pipeline == "tensor-metal" ||
          pipeline == "tensor-metal-ir" || pipeline == "tensor-input-ir" ||
          pipeline == "tensor-input-metal";
+}
+
+std::vector<int64_t> parseShape(const std::string &text) {
+  auto shape = yaml<std::vector<int64_t>>(text);
+  require(!shape.empty() && shape.size() <= 2 &&
+              std::all_of(shape.begin(), shape.end(), [](int64_t n) { return n >= 0; }),
+          "shape assertion requires rank 1 or 2 nonnegative extents");
+  return shape;
 }
 
 ExpectedError parseError(const std::string &text) {
@@ -327,7 +343,8 @@ static TestCase parseSingleCase(const std::string &path,
     require(!run.name.empty() && names.insert(run.name).second,
             "empty or duplicate run name: " + run.name);
     require(knownPipeline(run.pipeline), "unknown pipeline: " + run.pipeline);
-    const bool sourceInputs = run.pipeline == "tensor-input-cpu" ||
+    const bool shaped = run.pipeline == "shaped-input-ir" || run.pipeline == "shaped-input-cpu";
+    const bool sourceInputs = shaped || run.pipeline == "tensor-input-cpu" ||
                               run.pipeline == "tensor-input-ir" ||
                               run.pipeline == "tensor-input-metal";
     require(!sourceInputs ||
@@ -335,6 +352,10 @@ static TestCase parseSingleCase(const std::string &path,
             "external-input pipeline requires source input and arguments");
     require(!run.arguments || sourceInputs,
             "arguments is only supported by external-input pipelines");
+    if (run.arguments)
+      for (const auto &argument : *run.arguments)
+        require(argument.shape.has_value() == shaped,
+                "shape is required for shaped pipelines and forbidden for flat pipelines");
     const bool mapIR =
         run.pipeline == "tensor-cpu-ir" || run.pipeline == "tensor-metal-ir";
     if (mapIR) {
@@ -364,7 +385,7 @@ static TestCase parseSingleCase(const std::string &path,
       static const std::set<std::string> kinds{
           "result",   "compare",          "error",      "success",
           "ir-equal", "ir-check",         "text-equal", "text-check",
-          "effects",  "source-unchanged", "entrypoint"};
+          "effects",  "source-unchanged", "entrypoint", "shape"};
       require(kinds.contains(assertion.kind),
               "unknown assertion: " + assertion.kind);
       require(supports(run.pipeline, assertion.kind),
@@ -374,6 +395,8 @@ static TestCase parseSingleCase(const std::string &path,
         parseError(assertion.value);
         error = true;
       }
+      if (assertion.kind == "shape")
+        parseShape(assertion.value);
       if (assertion.kind == "result")
         parseNumber(assertion.value);
       if (assertion.kind == "compare")

@@ -12,6 +12,8 @@ Paths below are relative to `test/`.
 
 | File | Purpose | Cases |
 | --- | --- | ---: |
+| [shaped_input/same_shape.ml](../test/shaped_input/same_shape.ml) | Rank-1/rank-2 CPU maps, ownership fixtures, empty shapes and Linalg structure | 14 |
+| [shaped_input/invalid.ml](../test/shaped_input/invalid.ml) | Shape, storage, bounds, name and expression rejection | 21 |
 | [tensor/arithmetic-semantics.ml](../test/tensor/arithmetic-semantics.ml) | Literal identity, signed results and i32 wrapping | 3 |
 | [tensor/dispatch/threadgroup-boundaries.ml](../test/tensor/dispatch/threadgroup-boundaries.ml) | Literal dispatch below, at and above a threadgroup boundary | 4 |
 | [tensor/dispatch/launch-validation.ml](../test/tensor/dispatch/launch-validation.ml) | Reject unsupported launch widths | 1 |

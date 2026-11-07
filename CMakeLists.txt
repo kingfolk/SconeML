@@ -221,7 +221,18 @@ add_executable(grouped_spec_checks test/runner/GroupedSpecChecks.cpp)
 target_compile_options(grouped_spec_checks PRIVATE -fexceptions)
 target_link_libraries(grouped_spec_checks PRIVATE SconeMLTestSpec)
 
+add_llvm_executable(shaped_cpu_contracts
+  test/runner/ShapedCPUContracts.cpp
+  src/tensor/CPURunner.cpp
+  src/tensor/TensorFrontend.cpp
+  src/dialect/LetAlgDialect.cpp)
+target_compile_options(shaped_cpu_contracts PRIVATE -fexceptions)
+add_dependencies(shaped_cpu_contracts LetAlgDialectIncGen)
+target_link_libraries(shaped_cpu_contracts PRIVATE SconeMLTestSpec MLIR MLIRExecutionEngine)
+
 enable_testing()
+add_test(NAME shaped_cpu_contracts COMMAND shaped_cpu_contracts
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/shaped_input/same_shape.ml)
 add_test(NAME grouped_spec_contracts COMMAND grouped_spec_checks
   ${CMAKE_CURRENT_SOURCE_DIR}/test/acceptance_m2/matrix/single-input-launch-boundaries.ml)
 add_test(NAME compiler_suite COMMAND tester)
