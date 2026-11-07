@@ -1,5 +1,6 @@
 #include "src/tensor/GPURunner.h"
 #include "test/runner/TestSpec.h"
+#include "test/runner/InputOwnership.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <array>
@@ -25,7 +26,7 @@ int main(int argc, char **argv) {
   using namespace sconeml::test;
   using namespace sconeml::tensor;
   try {
-    require(argc == 3, "usage: gpu_input_contracts <polynomial.ml> <alias.ml>");
+    require(argc == 5, "usage: gpu_input_contracts <polynomial.ml> <alias.ml> <lifetime.ml> <overlap.ml>");
     const auto test = readCase(argv[1]);
     const auto &first = test.runs.at(0).arguments->at(0);
     std::array<TensorArgument, 1> empty{{{first.name, {}}}};
@@ -51,6 +52,10 @@ int main(int argc, char **argv) {
     rejects("only available on macOS", [&] { runTensorGPU(test.program, arguments); });
 #else
     if (gpuIsAvailable()) {
+      rejects("threads per threadgroup", [&] {
+        runTensorGPU(test.program, arguments, nullptr,
+                     {std::numeric_limits<uint32_t>::max()});
+      });
       const auto &changed = test.runs.at(1).arguments->at(0);
       const auto expected = parseNumber(test.assertions.at("first").front().value).values;
       const auto changedExpected = parseNumber(test.assertions.at("changed").front().value).values;
@@ -105,6 +110,26 @@ int main(int argc, char **argv) {
       rejects("no Metal GPU is available", [&] { runTensorGPU(multi.program, aliased); });
     }
 #endif
+
+    const auto three = readCase(argv[3]);
+    std::vector<TensorArgument> threeInputs;
+    for (const auto &argument : *three.runs.front().arguments)
+      threeInputs.push_back({argument.name, argument.values});
+    if (gpuIsAvailable()) {
+      checkThreeInputOwnership(argv[3], argv[4], [](const auto &program, auto arguments) {
+        return runTensorGPU(program, arguments, nullptr, {4});
+      });
+    } else {
+#ifdef SCONEML_EXPECT_METAL_STUB
+      rejects("only available on macOS", [&] { runTensorGPU(three.program, threeInputs); });
+#else
+      rejects("no Metal GPU is available", [&] { runTensorGPU(three.program, threeInputs); });
+#endif
+    }
+    for (auto &argument : threeInputs)
+      argument.values = {};
+    require(runTensorGPU(three.program, threeInputs).empty(),
+            "three-input empty call must not require a device");
 
     llvm::outs() << "PASS GPU input validation, empty and no-fallback contracts\n";
     return 0;
