@@ -43,8 +43,8 @@ shape and zero values without JIT. Its optional LLVM dump is cleared and empty.
 Canonical stride products are checked even when a leading zero extent makes
 the total count zero; an unrepresentable trailing stride is rejected.
 
-The [shaped Metal API](shaped-tensor-metal.md) supports identical shapes.
-GPU broadcasting remains deferred; unsupported GPU shapes fail explicitly. The existing
+The [shaped Metal API](shaped-tensor-metal.md) supports the same rank-1/rank-2
+trailing-axis broadcast rules, subject to its checked GPU index limits. The existing
 `TensorArgument`, literal APIs and flat `runTensorCPU`/`runTensorGPU` retain
 their equal-length contracts and do not acquire broadcasting.
 

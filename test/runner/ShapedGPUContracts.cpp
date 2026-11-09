@@ -47,9 +47,12 @@ std::string print(mlir::ModuleOp module) {
   return text;
 }
 } // namespace
+void checkBroadcastGPUContracts(const std::string &path);
+
 int main(int argc, char **argv) {
   try {
-    require(argc == 2, "usage: shaped_gpu_contracts <semantics.ml>");
+    require(argc == 3, "usage: shaped_gpu_contracts <semantics.ml> <broadcast-semantics.ml>");
+    checkBroadcastGPUContracts(argv[2]);
     auto test = sconeml::test::readCase(argv[1], "rank2-three");
     auto args = arguments(test);
     sconeml::MetalKernelSource owned;
@@ -168,8 +171,10 @@ int main(int argc, char **argv) {
             [&] { runShapedTensorGPU("", empty); });
     std::array<ShapedTensorArgument, 2> broadcast{
         {{"a", {}, {0, 3}}, {"b", {}, {0, 1}}}};
-    rejects("broadcasting is not supported",
-            [&] { runShapedTensorGPU("a + b", broadcast); });
+    source = "stale";
+    const auto emptyBroadcast = runShapedTensorGPU("a + b", broadcast, &source);
+    require(emptyBroadcast.values.empty() && emptyBroadcast.shape == std::vector<int64_t>({0,3}) && source.empty(),
+            "empty broadcast must preserve shape and skip kernel export");
 #ifdef SCONEML_EXPECT_METAL_STUB
     require(!gpuIsAvailable(), "stub unexpectedly reports a device");
     rejects("only available on macOS",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""M3-C shaped Metal fixtures, using the independent nested-loop i32 oracle."""
+"""Shaped Metal regression fixtures using the independent nested-loop i32 oracle."""
 import argparse
 from pathlib import Path
 import sys
@@ -113,7 +113,7 @@ def fixtures():
                          ('rank-mismatch',([3],[1,3])),('empty-broadcast',([0,3],[1,3]))]:
         from math import prod
         args=[(var,list(range(prod(shape))),shape) for var,shape in zip('ab',shapes)]
-        add('invalid.ml',name,'a + b',args,error=('gpu-lowering','shaped GPU broadcasting is not supported yet'))
+        add('semantics.ml', name, 'a + b', args, [('out','add','a','b')])
     add('invalid.ml','empty-bad-syntax','a +',[('a',[],[0,3])],error=('frontend','empty or missing an operand'))
     add('invalid.ml','empty-negative-shape','a',[('a',[],[0,-1])],error=('frontend','extents must be nonnegative'))
     add('invalid.ml','invalid-width','a',[('a',[1],[1])],width=4294967296,error=('gpu-lowering','threads per threadgroup'))

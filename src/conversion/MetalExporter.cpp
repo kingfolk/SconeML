@@ -1,4 +1,5 @@
 #include "src/conversion/MetalExporter.h"
+#include "src/conversion/ShapedGPUIndexing.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
@@ -40,6 +41,98 @@ bool supportedOperation(mlir::Operation *op) {
       mlir::memref::LoadOp, mlir::memref::StoreOp>(op);
 }
 
+mlir::FailureOr<std::optional<BroadcastIndexPlan>>
+readBroadcastPlan(mlir::ModuleOp module, mlir::gpu::GPUFuncOp kernel,
+                  size_t arity) {
+  auto attr = module->getAttr("sconeml.broadcast");
+  auto marker = kernel->getAttr("sconeml.broadcast_kernel");
+  if (!attr && !marker)
+    return std::optional<BroadcastIndexPlan>{};
+  auto fail = [&]() -> mlir::FailureOr<std::optional<BroadcastIndexPlan>> {
+    reject(module, "invalid broadcast kernel metadata");
+    return mlir::failure();
+  };
+  if (!attr || !marker || !mlir::isa<mlir::UnitAttr>(marker) ||
+      module->hasAttr("sconeml.shaped") ||
+      kernel->hasAttr("sconeml.shaped_kernel"))
+    return fail();
+  auto metadata = mlir::dyn_cast<mlir::DictionaryAttr>(attr);
+  auto shape = metadata ? metadata.getAs<mlir::DenseI64ArrayAttr>("shape")
+                        : mlir::DenseI64ArrayAttr();
+  auto shapes = metadata ? metadata.getAs<mlir::ArrayAttr>("input_shapes")
+                         : mlir::ArrayAttr();
+  auto counts = metadata
+                    ? metadata.getAs<mlir::DenseI64ArrayAttr>("input_counts")
+                    : mlir::DenseI64ArrayAttr();
+  auto output = metadata ? metadata.getAs<mlir::IntegerAttr>("output_count")
+                         : mlir::IntegerAttr();
+  if (!metadata || metadata.size() != 4 || !shape || !shapes || !counts ||
+      !output || shapes.size() != arity || counts.size() != arity ||
+      !output.getType().isSignlessInteger(64))
+    return fail();
+  std::vector<std::vector<int64_t>> inputs;
+  for (auto attribute : shapes) {
+    auto input = mlir::dyn_cast<mlir::DenseI64ArrayAttr>(attribute);
+    if (!input)
+      return fail();
+    inputs.emplace_back(input.asArrayRef().begin(), input.asArrayRef().end());
+  }
+  try {
+    auto plan = makeBroadcastIndexPlan(
+        inputs, {shape.asArrayRef().begin(), shape.asArrayRef().end()});
+    if (output.getInt() < 0 || static_cast<uint64_t>(output.getInt()) !=
+                                   plan.layout.outputElementCount)
+      return fail();
+    for (size_t i = 0; i < arity; ++i)
+      if (counts[i] < 0 ||
+          static_cast<uint64_t>(counts[i]) != plan.layout.inputElementCounts[i])
+        return fail();
+    return std::optional<BroadcastIndexPlan>{std::move(plan)};
+  } catch (const std::exception &) {
+    return fail();
+  }
+}
+
+// Consume only the canonical index prefix for this input. Scalar values and
+// index values remain separate: no arbitrary index arithmetic is authorized.
+mlir::Value readInputIndex(mlir::Block &body, mlir::Block::iterator &cursor,
+                           mlir::Operation *store, mlir::Value index,
+                           BroadcastIndex kind, int64_t columns) {
+  auto take = [&]() -> mlir::Operation * {
+    if (cursor == body.end() || &*cursor == store)
+      return nullptr;
+    return &*cursor++;
+  };
+  if (kind == BroadcastIndex::Identity)
+    return index;
+  auto *operation = take();
+  auto constant = mlir::dyn_cast_or_null<mlir::arith::ConstantOp>(operation);
+  auto value = constant ? mlir::dyn_cast<mlir::IntegerAttr>(constant.getValue())
+                        : mlir::IntegerAttr();
+  const int64_t expected = kind == BroadcastIndex::Zero ? 0 : columns;
+  if (!constant || !constant.getType().isIndex() || !value ||
+      value.getInt() != expected)
+    return {};
+  if (kind == BroadcastIndex::Zero)
+    return constant.getResult();
+  // Positive C is proved by nonempty output metadata; zero output uses Zero.
+  if (columns <= 0)
+    return {};
+  auto *arithmetic = take();
+  if (!arithmetic || arithmetic->getNumResults() != 1 ||
+      !arithmetic->getResult(0).getType().isIndex() ||
+      arithmetic->getNumOperands() != 2 || arithmetic->getOperand(0) != index ||
+      arithmetic->getOperand(1) != constant.getResult())
+    return {};
+  if (kind == BroadcastIndex::Row) {
+    auto divide = mlir::dyn_cast<mlir::arith::DivUIOp>(arithmetic);
+    if (!divide || divide.getIsExact())
+      return {};
+  } else if (!mlir::isa<mlir::arith::RemUIOp>(arithmetic))
+    return {};
+  return arithmetic->getResult(0);
+}
+
 // Validate the complete envelope before emitting any source. This is a
 // restricted exporter, not a general lowering of arbitrary MLIR index values.
 mlir::FailureOr<mlir::gpu::GPUFuncOp> validate(mlir::ModuleOp module) {
@@ -47,8 +140,10 @@ mlir::FailureOr<mlir::gpu::GPUFuncOp> validate(mlir::ModuleOp module) {
     reject(module, "input IR verification failed");
     return mlir::failure();
   }
-  auto walk = module.walk([](mlir::Operation *op) {
-    if (!supportedOperation(op)) {
+  auto walk = module.walk([&](mlir::Operation *op) {
+    if (!supportedOperation(op) &&
+        !(module->hasAttr("sconeml.broadcast") &&
+          mlir::isa<mlir::arith::DivUIOp, mlir::arith::RemUIOp>(op))) {
       reject(op, "unsupported operation");
       return mlir::WalkResult::interrupt();
     }
@@ -72,8 +167,9 @@ mlir::FailureOr<mlir::gpu::GPUFuncOp> validate(mlir::ModuleOp module) {
   auto kernel = *kernels.begin();
   auto type = kernel.getFunctionType();
   const auto parameters = type.getNumInputs();
-  bool signature = kernel.isKernel() && llvm::hasSingleElement(kernel.getBody()) &&
-                   parameters >= 3 && parameters <= 5 && type.getNumResults() == 0;
+  bool signature =
+      kernel.isKernel() && llvm::hasSingleElement(kernel.getBody()) &&
+      parameters >= 3 && parameters <= 5 && type.getNumResults() == 0;
   if (signature) {
     signature = kernel.getBody().front().getNumArguments() == parameters &&
                 type.getInput(parameters - 1).isSignlessInteger(32);
@@ -87,6 +183,10 @@ mlir::FailureOr<mlir::gpu::GPUFuncOp> validate(mlir::ModuleOp module) {
     return mlir::failure();
   }
   const unsigned inputCount = parameters - 2;
+  auto broadcastResult = readBroadcastPlan(module, kernel, inputCount);
+  if (mlir::failed(broadcastResult))
+    return mlir::failure();
+  const auto &broadcast = *broadcastResult;
   auto &entry = kernel.getBody().front();
   llvm::SmallVector<mlir::Operation *> ops;
   for (auto &op : entry)
@@ -120,7 +220,8 @@ mlir::FailureOr<mlir::gpu::GPUFuncOp> validate(mlir::ModuleOp module) {
       base.getRhs() != width.getResult() ||
       index.getLhs() != base.getResult() ||
       index.getRhs() != thread.getResult() ||
-      count.getIn() != entry.getArgument(inputCount + 1) || !count.getType().isIndex() ||
+      count.getIn() != entry.getArgument(inputCount + 1) ||
+      !count.getType().isIndex() ||
       cmp.getPredicate() != mlir::arith::CmpIPredicate::ult ||
       cmp.getLhs() != index.getResult() || cmp.getRhs() != count.getResult() ||
       guard.getCondition() != cmp.getResult() || guard.getNumResults() != 0 ||
@@ -151,20 +252,40 @@ mlir::FailureOr<mlir::gpu::GPUFuncOp> validate(mlir::ModuleOp module) {
   auto yield = mlir::dyn_cast<mlir::scf::YieldOp>(&body.back());
   if (!store || !yield || yield.getNumOperands() != 0 ||
       store.getMemref() != entry.getArgument(inputCount) ||
-      store.getIndices().size() != 1 || store.getIndices()[0] != index.getResult()) {
+      store.getIndices().size() != 1 ||
+      store.getIndices()[0] != index.getResult()) {
     reject(guard,
            "expected input[index] load and output[index] store inside guard");
     return mlir::failure();
   }
   llvm::DenseSet<mlir::Value> scalars;
   auto scalarBegin = body.begin();
-  for (unsigned i = 0; i < inputCount; ++i, ++scalarBegin) {
-    auto load = mlir::dyn_cast<mlir::memref::LoadOp>(&*scalarBegin);
-    if (!load || load.getMemref() != entry.getArgument(i) ||
-        load.getIndices().size() != 1 || load.getIndices()[0] != index.getResult()) {
-      reject(guard, "expected input[index] load and output[index] store inside guard");
+  int64_t columns = 1;
+  if (broadcast) {
+    auto metadata =
+        module->getAttrOfType<mlir::DictionaryAttr>("sconeml.broadcast");
+    columns =
+        metadata.getAs<mlir::DenseI64ArrayAttr>("shape").asArrayRef().back();
+  }
+  for (unsigned i = 0; i < inputCount; ++i) {
+    auto expectedIndex =
+        broadcast
+            ? readInputIndex(body, scalarBegin, store.getOperation(),
+                             index.getResult(), broadcast->inputs[i], columns)
+            : index.getResult();
+    auto load = scalarBegin != body.end()
+                    ? mlir::dyn_cast<mlir::memref::LoadOp>(&*scalarBegin)
+                    : mlir::memref::LoadOp();
+    if (!expectedIndex || !load || load.getMemref() != entry.getArgument(i) ||
+        load.getIndices().size() != 1 ||
+        load.getIndices()[0] != expectedIndex) {
+      reject(guard, broadcast
+                        ? "input index does not match verified broadcast map"
+                        : "expected input[index] load and output[index] store "
+                          "inside guard");
       return mlir::failure();
     }
+    ++scalarBegin;
     scalars.insert(load.getResult());
   }
   for (auto it = scalarBegin; &*it != store.getOperation(); ++it) {
@@ -247,6 +368,8 @@ public:
           const char *symbol = mlir::isa<mlir::arith::AddIOp>(op)   ? " + "
                                : mlir::isa<mlir::arith::SubIOp>(op) ? " - "
                                : mlir::isa<mlir::arith::MulIOp>(op) ? " * "
+                               : mlir::isa<mlir::arith::DivUIOp>(op) ? " / "
+                               : mlir::isa<mlir::arith::RemUIOp>(op) ? " % "
                                                                     : " < ";
           stream << names.lookup(op.getOperand(0)) << symbol
                  << names.lookup(op.getOperand(1));
@@ -328,6 +451,9 @@ mlir::FailureOr<MetalKernelSource> exportMetalKernel(mlir::ModuleOp module) {
     }
     result.shapedLayout = std::move(layout);
   }
+  auto broadcast = readBroadcastPlan(module, *kernel, result.inputCount);
+  if (mlir::failed(broadcast)) return mlir::failure();
+  if (*broadcast) result.shapedLayout = (**broadcast).layout;
   Emitter emitter(stream);
   stream << "#include <metal_stdlib>\nusing namespace metal;\n\n";
   for (unsigned i = 0; i < result.inputCount; ++i) {

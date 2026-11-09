@@ -71,3 +71,16 @@ SconeMLMetalExporter is still ordinary C++ with no device API calls. The two rem
 The public GPU runner now extracts GPU IR, invokes this exporter, and passes the returned source and entrypoint to the one-shot Metal runtime. The recursive expression emitter has been removed. The `tensor-metal` test pipeline checks actual dispatch and numeric results; `metal-compile` continues to check compilation/pipeline creation only. See [runtime integration](metal-runtime.md) for launch geometry, bounds, and device validation commands.
 
 M2-C cases in `test/multi_input/ir` include a complete three-input expected MSL, ordered loads/SSA checks and rejection of swapped input loads. See [multi-input details](multi-input-tensor-map.md).
+
+## Verified broadcast form
+
+The legacy same-index envelope above remains unchanged. The separately marked
+`sconeml.broadcast` / `sconeml.broadcast_kernel` form adds per-input/output
+shapes and counts. Its loads must use exactly the normalized identity, zero,
+row (`index / C`) or column (`index % C`) index inferred from those shapes.
+Index constants and unsigned div/rem must occur inside the bounds guard with
+a verified positive C and the global index as numerator. The output still
+stores at the global index. Scalar division, arbitrary affine expressions,
+exact/no-wrap promises, malformed metadata and mismatched load/buffer bindings
+are rejected. Empty output never emits div/rem. See the
+[shaped Metal API](shaped-tensor-metal.md) for rules, range proofs and examples.

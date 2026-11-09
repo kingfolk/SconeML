@@ -197,16 +197,24 @@ broadcast fixtures without writing. Regenerate only those fixtures with
 `ir-check` and `source-unchanged`; the MSL adapter also accepts text checks and
 `entrypoint`. All require source input with per-argument shape and values.
 
-GPU target validation reports at `gpu-lowering`, before any device skip or
-empty early return. The current feature requires identical shapes; compatible
-broadcast shapes explicitly fail. Strict Metal policy applies to every nonempty
-GPU execution. Empty same-shape calls succeed without a device and emit no MSL.
+Shape/storage/syntax errors report at `frontend`; GPU target and launch bounds
+report at `gpu-lowering` before device skips or empty returns. Shaped GPU runs
+support the same trailing-axis broadcast shapes as CPU within target limits. Strict Metal policy applies to every nonempty
+GPU execution. Empty inferred shapes, including broadcasts with nonempty inputs, succeed
+without a device and emit no MSL.
 `shaped_gpu_contracts` and `shaped_gpu_stub_contracts` check extraction/export,
-metadata lifetime/corruption, empty/unavailable behavior and direct ownership.
+metadata lifetime/corruption, malformed broadcast index paths, empty/unavailable
+behavior, unequal-buffer overlap and direct ownership.
 `shaped_gpu_reference_fixtures` uses the independent nested-loop oracle and
 checks exact generated contents read-only. Regenerate with
 `python3 test/reference/generate_shaped_gpu.py`, or add `--check` to verify.
-See [usage](shaped-tensor-metal.md) and [M3-C evidence](m3-c-acceptance.md).
+`gpu_broadcast_reference_fixtures` adds four grouped GPU broadcast files checked
+against the independent nested-loop oracle. Regenerate with
+`python3 test/reference/generate_gpu_broadcast.py` or verify with `--check`.
+The two direct GPU contract executables now take both
+`test/shaped_gpu/semantics.ml` and `test/broadcast_gpu/semantics.ml` as arguments.
+See [usage](shaped-tensor-metal.md), [M3-C evidence](m3-c-acceptance.md) and
+[M3-D evidence](m3-d-acceptance.md).
 
 ## IR format
 

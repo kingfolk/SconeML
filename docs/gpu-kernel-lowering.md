@@ -69,3 +69,12 @@ The production transformation remains in SconeMLTensorGPU. A separate small inte
 The public GPU runner now uses this extraction API and the independent MSL exporter for actual Metal execution. The `tensor-metal` data pipeline verifies numeric results with uniform padded dispatch; see [Metal runtime integration](metal-runtime.md). Lowering/export-only checks remain runnable without a device.
 
 Multi-input lowering loads every input at the same index inside the guard, maps all scalar block arguments, clones shared SSA definitions once, and stores the result. K=1 retains the original signature. See [multi-input maps](multi-input-tensor-map.md) for the source API, validated ABI and tests.
+
+## Shaped broadcasting
+
+`lowerShapedTensorToGPU` additionally accepts the production shaped Linalg
+wrapper. Identical shapes retain the existing TensorMap extraction. Different
+compatible rank-1/rank-2 shapes produce a separately marked device module with
+shape/count metadata and guarded identity/zero/row/column loads. Scalar IR is
+cloned once and each declared input is loaded once per output thread. The host
+module is preserved. See [shaped Metal execution](shaped-tensor-metal.md).
