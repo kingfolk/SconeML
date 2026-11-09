@@ -232,7 +232,9 @@ target_link_libraries(shaped_cpu_contracts PRIVATE SconeMLTestSpec MLIR MLIRExec
 
 enable_testing()
 add_test(NAME shaped_cpu_contracts COMMAND shaped_cpu_contracts
-  ${CMAKE_CURRENT_SOURCE_DIR}/test/shaped_input/same_shape.ml)
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/shaped_input/same_shape.ml
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/shaped_input/broadcast/semantics.ml
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/shaped_input/broadcast/empty.ml)
 add_test(NAME grouped_spec_contracts COMMAND grouped_spec_checks
   ${CMAKE_CURRENT_SOURCE_DIR}/test/acceptance_m2/matrix/single-input-launch-boundaries.ml)
 add_test(NAME compiler_suite COMMAND tester)
@@ -260,6 +262,8 @@ add_test(NAME reference_fixtures COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate.py --check)
 add_test(NAME multi_input_reference_fixtures COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate_m2.py --check)
+add_test(NAME broadcast_reference_fixtures COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate_broadcast.py --check)
 add_test(NAME runner_contracts COMMAND ${CMAKE_COMMAND}
   -DRUNNER=$<TARGET_FILE:tester>
   -DDATA_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/test

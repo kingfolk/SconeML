@@ -29,9 +29,10 @@ struct ShapedTensorArgumentSpec {
   std::size_t elementCount;
   std::vector<int64_t> shape;
 };
-// Same-shape only; validates all arguments (including unused inputs) before IR
-// construction. Builds flat C-ABI buffers, canonical views and linalg.generic.
-void translateShapedTensorExpression(
+// Infers trailing-axis broadcasting over every declared input, validates names,
+// shapes and storage, and returns the checked output shape. Builds flat C-ABI
+// buffers, canonical views and linalg.generic with broadcast indexing maps.
+std::vector<int64_t> translateShapedTensorExpression(
     mlir::ModuleOp module, const std::string &expression,
     std::span<const ShapedTensorArgumentSpec> arguments);
 // Narrow production envelope validation, also used before CPU lowering.

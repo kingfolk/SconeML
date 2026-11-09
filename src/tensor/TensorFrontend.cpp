@@ -113,6 +113,43 @@ DenseShape checkedDenseShape(llvm::ArrayRef<int64_t> shape) {
   }
   return layout;
 }
+// Right alignment is deliberate: [R] aligns to columns, never to rows.
+// In particular, 0 broadcast with 1 stays 0; numerical max would be wrong.
+std::vector<int64_t>
+inferBroadcastShape(llvm::ArrayRef<llvm::ArrayRef<int64_t>> shapes) {
+  size_t rank = 1;
+  for (auto shape : shapes)
+    rank = std::max(rank, shape.size());
+  std::vector<int64_t> result(rank, 1);
+  for (auto shape : shapes)
+    for (size_t axis = 0; axis < shape.size(); ++axis) {
+      auto &extent = result[rank - shape.size() + axis];
+      if (extent == shape[axis])
+        continue;
+      if (extent == 1)
+        extent = shape[axis];
+      else if (shape[axis] != 1)
+        throw std::invalid_argument(
+            "incompatible shaped tensor broadcast dimensions");
+    }
+  // Individually small inputs can produce an unrepresentable outer product.
+  checkedDenseShape(result);
+  return result;
+}
+
+mlir::AffineMap broadcastMap(llvm::ArrayRef<int64_t> inputShape,
+                             llvm::ArrayRef<int64_t> outputShape,
+                             mlir::MLIRContext *context) {
+  llvm::SmallVector<mlir::AffineExpr> indices;
+  for (size_t axis = 0; axis < inputShape.size(); ++axis)
+    indices.push_back(inputShape[axis] == 1
+                          ? mlir::getAffineConstantExpr(0, context)
+                          : mlir::getAffineDimExpr(outputShape.size() -
+                                                       inputShape.size() + axis,
+                                                   context));
+  return mlir::AffineMap::get(outputShape.size(), 0, indices, context);
+}
+
 void shapedRequire(bool valid, const char *message) {
   if (!valid)
     throw std::invalid_argument(std::string("invalid shaped tensor IR: ") +
@@ -120,7 +157,7 @@ void shapedRequire(bool valid, const char *message) {
 }
 } // namespace
 
-void translateShapedTensorExpression(
+std::vector<int64_t> translateShapedTensorExpression(
     mlir::ModuleOp module, const std::string &source,
     std::span<const ShapedTensorArgumentSpec> arguments) {
   if (arguments.empty() || arguments.size() > 3)
@@ -138,35 +175,43 @@ void translateShapedTensorExpression(
     if (static_cast<uint64_t>(layout.count) != argument.elementCount)
       throw std::invalid_argument(
           "shaped tensor storage count does not match shape product");
-    if (argument.shape != arguments.front().shape)
-      throw std::invalid_argument("shaped tensors must have the same shape; "
-                                  "broadcasting is not supported yet");
   }
+  llvm::SmallVector<llvm::ArrayRef<int64_t>> inputShapes;
+  for (const auto &argument : arguments)
+    inputShapes.push_back(argument.shape);
+  const auto shape = inferBroadcastShape(inputShapes);
   auto expression = parseTensorExpression(source);
   validateNames(expression.get(), names);
   module.getContext()->getOrLoadDialect<mlir::linalg::LinalgDialect>();
   mlir::OpBuilder builder(module.getContext());
   auto loc = builder.getUnknownLoc();
-  const auto &shape = arguments.front().shape;
-  const auto layout = checkedDenseShape(shape);
-  auto flat = mlir::MemRefType::get({layout.count}, builder.getI32Type());
-  auto viewType = mlir::MemRefType::get(
-      shape, builder.getI32Type(),
-      mlir::StridedLayoutAttr::get(module.getContext(), 0, layout.strides));
+  llvm::SmallVector<mlir::Type> flatTypes;
+  llvm::SmallVector<llvm::ArrayRef<int64_t>> viewShapes(inputShapes);
+  viewShapes.push_back(shape);
+  for (auto viewShape : viewShapes)
+    flatTypes.push_back(mlir::MemRefType::get(
+        {checkedDenseShape(viewShape).count}, builder.getI32Type()));
   builder.setInsertionPointToStart(module.getBody());
-  auto function = mlir::func::FuncOp::create(
-      builder, loc, "shaped_tensor_expression",
-      builder.getFunctionType(
-          llvm::SmallVector<mlir::Type>(arguments.size() + 1, flat), {}));
+  auto function =
+      mlir::func::FuncOp::create(builder, loc, "shaped_tensor_expression",
+                                 builder.getFunctionType(flatTypes, {}));
   function->setAttr("llvm.emit_c_interface", builder.getUnitAttr());
   auto *entry = function.addEntryBlock();
   builder.setInsertionPointToStart(entry);
   llvm::SmallVector<mlir::Value> views;
-  for (auto buffer : entry->getArguments())
+  for (auto [buffer, viewShape] :
+       llvm::zip(entry->getArguments(), viewShapes)) {
+    auto layout = checkedDenseShape(viewShape);
+    auto viewType = mlir::MemRefType::get(
+        viewShape, builder.getI32Type(),
+        mlir::StridedLayoutAttr::get(module.getContext(), 0, layout.strides));
     views.push_back(mlir::memref::ReinterpretCastOp::create(
-        builder, loc, viewType, buffer, 0, shape, layout.strides));
-  llvm::SmallVector<mlir::AffineMap> maps(
-      arguments.size() + 1, builder.getMultiDimIdentityMap(shape.size()));
+        builder, loc, viewType, buffer, 0, viewShape, layout.strides));
+  }
+  llvm::SmallVector<mlir::AffineMap> maps;
+  for (auto inputShape : inputShapes)
+    maps.push_back(broadcastMap(inputShape, shape, module.getContext()));
+  maps.push_back(builder.getMultiDimIdentityMap(shape.size()));
   llvm::SmallVector<mlir::utils::IteratorType> iterators(
       shape.size(), mlir::utils::IteratorType::parallel);
   mlir::linalg::GenericOp::create(
@@ -184,6 +229,7 @@ void translateShapedTensorExpression(
       });
   mlir::func::ReturnOp::create(builder, loc);
   validateShapedTensorExpression(module);
+  return shape;
 }
 
 void validateShapedTensorExpression(mlir::ModuleOp module) {
@@ -207,7 +253,8 @@ void validateShapedTensorExpression(mlir::ModuleOp module) {
                 "unexpected wrapper operations");
   auto op = entry.begin();
   llvm::SmallVector<mlir::Value> views;
-  mlir::MemRefType common;
+  llvm::SmallVector<llvm::ArrayRef<int64_t>> inputShapes;
+  llvm::ArrayRef<int64_t> outputShape;
   for (size_t i = 0; i < arity; ++i, ++op) {
     auto view = mlir::dyn_cast<mlir::memref::ReinterpretCastOp>(&*op);
     shapedRequire(view && view.getSource() == entry.getArgument(i),
@@ -221,9 +268,11 @@ void validateShapedTensorExpression(mlir::ModuleOp module) {
     auto expected = mlir::MemRefType::get(
         type.getShape(), type.getElementType(),
         mlir::StridedLayoutAttr::get(module.getContext(), 0, layout.strides));
-    shapedRequire(type == expected && (!common || type == common),
-                  "noncanonical or unequal views");
-    common = type;
+    shapedRequire(type == expected, "noncanonical view");
+    if (i + 1 == arity)
+      outputShape = type.getShape();
+    else
+      inputShapes.push_back(type.getShape());
     shapedRequire(view.getStaticOffsets() == llvm::ArrayRef<int64_t>{0} &&
                       view.getStaticSizes() == type.getShape() &&
                       view.getStaticStrides() ==
@@ -237,6 +286,9 @@ void validateShapedTensorExpression(mlir::ModuleOp module) {
                   "flat buffer count/type/use mismatch");
     views.push_back(view.getResult());
   }
+  const auto inferred = inferBroadcastShape(inputShapes);
+  shapedRequire(outputShape == llvm::ArrayRef<int64_t>(inferred),
+                "output shape does not match inferred broadcast shape");
   auto map = mlir::dyn_cast<mlir::linalg::GenericOp>(&*op++);
   shapedRequire(map && map.getNumResults() == 0 &&
                     map.getInputs().size() == arity - 1 &&
@@ -248,12 +300,15 @@ void validateShapedTensorExpression(mlir::ModuleOp module) {
     shapedRequire(view.hasOneUse(), "view must only be used by the map");
   auto maps = map.getIndexingMapsArray();
   shapedRequire(maps.size() == arity, "indexing map count mismatch");
-  for (auto indexing : maps)
-    shapedRequire(indexing == mlir::AffineMap::getMultiDimIdentityMap(
-                                  common.getRank(), module.getContext()),
-                  "only identity indexing is supported");
+  for (size_t i = 0; i + 1 < arity; ++i)
+    shapedRequire(maps[i] == broadcastMap(inputShapes[i], outputShape,
+                                          module.getContext()),
+                  "input indexing must match inferred broadcast map");
+  shapedRequire(maps.back() == mlir::AffineMap::getMultiDimIdentityMap(
+                                   outputShape.size(), module.getContext()),
+                "output indexing must be identity");
   auto iterators = map.getIteratorTypesArray();
-  shapedRequire(iterators.size() == static_cast<size_t>(common.getRank()) &&
+  shapedRequire(iterators.size() == outputShape.size() &&
                     llvm::all_of(iterators,
                                  [](auto iterator) {
                                    return iterator ==
