@@ -234,6 +234,7 @@ target_link_libraries(shaped_cpu_contracts PRIVATE SconeMLTestSpec MLIR MLIRExec
 function(add_shaped_gpu_contract_target target runtime)
   add_llvm_executable(${target}
     test/runner/ShapedGPUContracts.cpp
+    test/runner/BroadcastGPUContracts.cpp
     src/tensor/GPURunner.cpp
     src/tensor/TensorFrontend.cpp
     src/tensor/MetalLaunch.cpp
@@ -254,9 +255,11 @@ target_compile_definitions(shaped_gpu_stub_contracts PRIVATE SCONEML_EXPECT_META
 
 enable_testing()
 add_test(NAME shaped_gpu_contracts COMMAND shaped_gpu_contracts
-  ${CMAKE_CURRENT_SOURCE_DIR}/test/shaped_gpu/semantics.ml)
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/shaped_gpu/semantics.ml
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/broadcast_gpu/semantics.ml)
 add_test(NAME shaped_gpu_stub_contracts COMMAND shaped_gpu_stub_contracts
-  ${CMAKE_CURRENT_SOURCE_DIR}/test/shaped_gpu/semantics.ml)
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/shaped_gpu/semantics.ml
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/broadcast_gpu/semantics.ml)
 add_test(NAME shaped_gpu_reference_fixtures COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate_shaped_gpu.py --check)
 add_test(NAME shaped_cpu_contracts COMMAND shaped_cpu_contracts
@@ -292,6 +295,8 @@ add_test(NAME multi_input_reference_fixtures COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate_m2.py --check)
 add_test(NAME broadcast_reference_fixtures COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate_broadcast.py --check)
+add_test(NAME gpu_broadcast_reference_fixtures COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate_gpu_broadcast.py --check)
 add_test(NAME runner_contracts COMMAND ${CMAKE_COMMAND}
   -DRUNNER=$<TARGET_FILE:tester>
   -DDATA_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/test

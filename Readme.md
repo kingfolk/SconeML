@@ -86,8 +86,9 @@ tensor map; it extracts the literal values from the translated IR. Other
 platforms keep the CPU test active and use a GPU runtime stub until a CUDA,
 ROCm, or SPIR-V backend is added. Shaped rank-1/rank-2 execution with trailing-axis broadcasting is available on CPU through the
 [shaped tensor API](docs/shaped-tensor-cpu.md). The
-[shaped Metal API](docs/shaped-tensor-metal.md) executes identical rank-1/rank-2
-shapes on GPU. GPU broadcasting and reductions remain future work.
+[shaped Metal API](docs/shaped-tensor-metal.md) executes rank-1/rank-2 shapes
+with row, column, singleton and outer broadcasting on GPU. Reductions remain
+future work.
 
 The [M1 acceptance matrix](docs/m1-acceptance.md) adds an independent 32-bit
 reference, reproducible source/IR fixtures and real CPU/Metal result checks.

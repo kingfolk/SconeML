@@ -17,14 +17,15 @@ struct MetalKernelSource {
   std::optional<tensor::MetalKernelLayout> shapedLayout;
 };
 
-// Export the verified one-dimensional map kernel produced by LowerTensorToGPU.
+// Export a verified legacy/same-shape or normalized broadcast GPU map kernel.
 // No device APIs are used and the input module is not modified. Unsupported IR
 // emits an MLIR diagnostic and returns failure, never partial executable
 // source. For K inputs (1-3), bindings are inputs 0..K-1, output K, count K+1;
 // inputCount reports the validated arity. Indexing uses uint. Launchers must use
 // uniform one-dimensional threadgroups and check
 // capacities, count, and padded grid indices against the u32 range before
-// execution.
+// execution. Broadcast metadata additionally proves per-input indices/counts;
+// div/rem is accepted only on that checked index path.
 mlir::FailureOr<MetalKernelSource> exportMetalKernel(mlir::ModuleOp module);
 
 } // namespace sconeml

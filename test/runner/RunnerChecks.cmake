@@ -392,11 +392,20 @@ string(REPLACE "a + 1" "(* @assert:compared:compare\ncpu\n*)\na + 1" changed "${
 file(WRITE "${SCRATCH}/shape-compare.ml" "${changed}")
 expect_failure(shape-compare "numeric result differs from run cpu" --file "${SCRATCH}/shape-compare.ml")
 
-# Shaped GPU policy validates unsupported broadcasting and launch bounds before
+# Shaped GPU policy validates target and launch bounds before
 # device skips. Empty same-shape execution remains a strict no-device success.
 expect_failure(shaped-strict-device "required device unavailable" --no-metal --require-metal
   --file "${DATA_ROOT}/shaped_gpu/semantics.ml" --case rank2-three --run metal)
 expect_success(shaped-empty-no-device "2 passed, 0 skipped, 0 failed" --no-metal --require-metal
   --file "${DATA_ROOT}/shaped_gpu/semantics.ml" --case empty-0x3 --run metal)
-expect_success(shaped-errors-before-device "9 passed, 0 skipped, 0 failed" --no-metal --require-metal
+expect_success(shaped-errors-before-device "4 passed, 0 skipped, 0 failed" --no-metal --require-metal
   --file "${DATA_ROOT}/shaped_gpu/invalid.ml")
+
+# Broadcast device availability remains per run; all empty/invalid cases must
+# validate even in strict no-device mode.
+expect_failure(broadcast-strict-device "required device unavailable" --no-metal --require-metal
+  --file "${DATA_ROOT}/broadcast_gpu/semantics.ml" --case matrix-row-column --run metal)
+expect_success(broadcast-empty-no-device "16 passed, 0 skipped, 0 failed" --no-metal --require-metal
+  --file "${DATA_ROOT}/broadcast_gpu/empty.ml")
+expect_success(broadcast-errors-before-device "6 passed, 0 skipped, 0 failed" --no-metal --require-metal
+  --file "${DATA_ROOT}/broadcast_gpu/invalid.ml")

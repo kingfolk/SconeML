@@ -1,102 +1,125 @@
-# Same-shape rank-1/rank-2 tensor execution on Metal
+# Rank-1/rank-2 tensor execution on Metal
 
 `runShapedTensorGPU` in `src/tensor/GPURunner.h` synchronously evaluates one
-expression over 1–3 named i32 inputs with identical dense row-major shapes.
-Rank 1 and rank 2 are supported. Results own their values and shape.
+expression over 1–3 named dense row-major i32 inputs with trailing-axis
+broadcasting. It returns owned values and the inferred rank-1/rank-2 shape.
 
 ```cpp
 #include "src/tensor/GPURunner.h"
 
 std::vector<int32_t> a{1, 2, 3, 4, 5, 6};
-std::vector<int32_t> b{10, 20, 30, 40, 50, 60};
+std::vector<int32_t> b{10, 20, 30};
+std::vector<int32_t> c{100, 200};
 std::vector<sconeml::tensor::ShapedTensorArgument> arguments{
-    {"a", a, {2, 3}}, {"b", b, {2, 3}}};
+    {"a", a, {2, 3}}, {"b", b, {3}}, {"c", c, {2, 1}}};
 std::string msl;
-auto result = sconeml::tensor::runShapedTensorGPU("a + b", arguments, &msl);
+auto result = sconeml::tensor::runShapedTensorGPU("a + b + c", arguments, &msl, {4});
 // result.shape == {2, 3}
-// result.values == {11, 22, 33, 44, 55, 66}
+// result.values == {111, 122, 133, 214, 225, 236}
 ```
 
-An optional final `MetalLaunchOptions` selects a positive explicit threadgroup
-width, for example `runShapedTensorGPU("a + b", arguments, &msl, {4})`.
-Default width is capped at 256 and the device/pipeline limit. The launcher uses
-uniform one-dimensional padded threadgroups with guarded loads and stores.
+The optional final `MetalLaunchOptions` selects a positive explicit threadgroup
+width, here 4. Default width is capped at 256 and the device/pipeline limit.
+The launcher retains uniform one-dimensional padded groups with guarded loads
+and stores. It never expands broadcast inputs into output-sized host buffers.
 
-## Shape, ownership and error contracts
+## Shape, ownership and errors
 
-The API uses the shared [shaped frontend](shaped-tensor-cpu.md), including its
-name, rank, extent, checked product/storage, canonical stride, scalar grammar,
-wrapping arithmetic and ownership rules. Input spans are borrowed and read-only;
-inputs can alias or overlap. The output has separate storage and survives input,
-compiler context, JIT and Metal resource destruction. No CPU fallback is used.
+The API shares [CPU shape inference](shaped-tensor-cpu.md): align axes from the
+right, treat missing axes as 1, and accept equal extents or singleton expansion.
+Zero with one gives zero; zero with two is incompatible. All declared inputs,
+including unused arguments and constant-only expression inputs, participate.
+For example `[2,1] + [1,3]` returns `[2,3]`, `[2,3] + [3]` reuses a row vector,
+and `[2,3] + [2]` fails instead of assuming column orientation.
 
-M3-C requires all input shapes to be identical. Compatible but different shapes
-such as `[2,3]` with `[3]`, `[2,1]` with `[1,3]`, or `[3]` with `[1,3]` are
-explicit errors before device availability is considered. CPU broadcasting
-continues to work. Identical singleton shapes such as `[1,3]` and `[3,1]` are
-supported: constant-zero singleton maps are equivalent to same-index loads
-because that output dimension also has extent one.
+Name/rank/extent/product/storage validation, canonical strides, the existing
+scalar grammar and wrapping i32 arithmetic retain the shared frontend contract.
+Inputs are borrowed and read-only and can alias or overlap. Output owns separate
+data and shape after inputs, compiler context and Metal resources disappear.
+Nonempty execution without a Metal device fails explicitly; no CPU fallback is
+used. Explicit non-Apple stub builds retain this behavior.
 
-Empty shapes `[0]`, `[0,3]` and `[2,0]` preserve their exact result shape, validate
-syntax, arguments, supported GPU shapes and fixed host launch bounds, and
-return no values without kernel extraction, MSL export, allocation or device
-access. The optional MSL dump is cleared and empty. Broadcasting remains an
-error even for empty output. Nonempty calls without a Metal device throw;
-non-Apple builds use the explicit stub and also throw for nonempty execution.
+Empty inferred shapes such as `[0]`, `[0,3]` or `[2,0]` preserve the exact shape,
+return no values and clear the MSL dump without kernel extraction/export,
+allocation or device access. This works even when an input is nonempty, for
+example `[2,1]` with `[1,0]`. Syntax, all input metadata, target host bounds and
+launch options still validate before the empty return. No zero-axis division
+or remainder is emitted or executed.
 
-Nonempty count and padded thread indices must fit u32. Input/output byte sizes
-and vector capacity are checked on the host; each device allocation is also
-checked independently against the actual device buffer limit. Invalid launch
-options fail even when output is empty or the device is unavailable.
+All input/output counts must fit u32, even if an unused input or an empty output
+would otherwise avoid reads. Nonempty canonical index ranges and padded global
+thread indices must fit u32. Host count/byte/vector/stride limits and each actual
+device buffer limit are checked before the corresponding allocation/dispatch.
 
-## Validated extraction and export
+## Index extraction and validation
 
-`validateShapedTensorGPU` first validates the complete shaped Linalg/wrapper
-contract, then requires identical input shapes and checks the target count.
-`lowerShapedTensorToGPU` builds a temporary flat TensorMap from the already
-validated scalar region and passes it through the existing GPU extraction.
-The source module remains unchanged. This is a focused identity-index bridge;
-it does not relax the old exporter to accept general Linalg or affine indexing.
+The frontend builds validated buffer-based Linalg with broadcast affine maps.
+`validateShapedTensorGPU` checks that complete wrapper/scalar contract and target
+bounds. Identical shapes retain M3-C's TensorMap bridge, old metadata form and
+identical legacy MSL. Different compatible shapes use a separately marked
+broadcast device form, with direct extraction from validated Linalg scalar IR.
+The source module remains unchanged.
 
-A shaped device module carries `sconeml.shaped` with `shape`, `input_counts` and
-`output_count`, and its kernel has a `sconeml.shaped_kernel` marker. The exporter
-verifies both markers, rank/extents/product/strides, metadata types and arity,
-exact input/output counts and the unchanged same-index kernel envelope before
-emitting MSL. Missing or inconsistent shaped metadata is rejected. The resulting
-MSL is identical to legacy flat MSL for the same scalar expression and arity.
+For a nonempty output `[R,C]`, the flattened global index is `i`. Input load
+indices are normalized to four forms:
 
-`MetalKernelSource::shapedLayout` owns a `MetalKernelLayout`: a vector of
-per-input element counts and the expected output count. It contains no MLIR
-references and can outlive the compiler context. The plain layout must remain
-paired with the source/entrypoint from its validated export.
+| Input mapping | Device index | Bound inside `i < R*C` |
+| --- | --- | --- |
+| Full dense input, or equivalent singleton/missing-axis identity | `i` | `< inputCount` |
+| All input elements collapse to a singleton | `0` | `< 1` |
+| Column `[R,1]` | `i / C` | `< R` |
+| Row `[C]` or `[1,C]` | `i % C` | `< C` |
 
-`runShapedMetalKernel` requires exact input lengths/arity and an exact requested
-output count matching this metadata. Output capacity may be larger; only the
-specialized prefix is written. Pure `planShapedMetalLaunch` checks synthetic
-lengths/capacities and returns each input's byte count plus output launch data.
-The real runtime copies each buffer using its own verified byte count, then
-reads output back only after successful command completion. Real/stub host
-preflight and empty behavior are shared. Old flat entry points remain wrappers
-with their existing prefix/capacity semantics.
+Equal input/output counts normalize to identity, preserving cases such as `[3]`
+with output `[1,3]`. Output always stores at `i`. Index constants/division/
+remainder and one load per input occur inside the existing bounds guard;
+repeated expression references reuse the same loaded scalar.
+
+Broadcast IR carries `sconeml.broadcast` with `input_shapes`, output `shape`,
+`input_counts` and `output_count`, plus a `sconeml.broadcast_kernel` marker.
+Export validates the schema, shapes, inferred output, counts, rank, canonical
+stride ranges and u32 limits. It then checks each exact index operation,
+positive divisor, global-index dependency, input binding and output store.
+Mixed/missing metadata markers, wrong maps, arbitrary affine arithmetic,
+index captures and unguarded loads are rejected.
+
+Unsigned division/remainder is allowed only for the normalized index path of
+this verified broadcast form. It does not enable division in scalar source
+expressions or relax legacy export. Scalar data still allows only local i32
+constants and wrapping addition/subtraction/multiplication. Signed guard
+comparisons, no-wrap promises and exact-division promises are rejected.
+
+## Runtime metadata
+
+`MetalKernelSource::shapedLayout` owns per-input counts and the expected output
+count, independent of MLIR context lifetime. Keep it paired with its validated
+source/entrypoint. For the three-input example, counts are `[6,3,2]` and output
+count is 6; input byte allocations/copies are respectively 24, 12 and 8, and
+output is 24 bytes. The existing M3-C runtime already supports these separate
+sizes and exact input-length/output-count validation.
+
+Inputs bind at slots 0..K-1, output at K, and count at K+1. Larger output capacity
+is allowed but only the specialized prefix is written. Readback occurs after
+successful command completion. Old flat APIs retain their equal-length and
+requested-prefix contracts.
 
 ## Tests
 
 ```sh
-cmake --build build --target tester shaped_gpu_contracts shaped_gpu_stub_contracts \
-  metal_runtime_checks metal_stub_checks -j3
-python3 test/reference/generate_shaped_gpu.py --check
-./build/tester --suite test/shaped_gpu --require-metal
-./build/shaped_gpu_contracts test/shaped_gpu/semantics.ml
-./build/shaped_gpu_stub_contracts test/shaped_gpu/semantics.ml
+cmake --build build --target tester shaped_gpu_contracts shaped_gpu_stub_contracts -j3
+python3 test/reference/generate_gpu_broadcast.py --check
+./build/tester --suite test/broadcast_gpu --require-metal
+./build/shaped_gpu_contracts test/shaped_gpu/semantics.ml test/broadcast_gpu/semantics.ml
+./build/shaped_gpu_stub_contracts test/shaped_gpu/semantics.ml test/broadcast_gpu/semantics.ml
 ctest --test-dir build --output-on-failure
 ```
 
-The grouped `shaped-input-metal` fixtures compare owned values and shape against
-CPU and explicit expectations from the independent nested-loop Python oracle.
-`shaped-input-gpu-ir` and `shaped-input-msl` inspect device IR, count metadata,
-parameter order, guards and MSL without device access. Direct contracts verify
-ownership/aliasing, metadata lifetime and corruption, target bounds, exact
-runtime bindings and canaries. See [M3-C acceptance](m3-c-acceptance.md).
+Grouped source fixtures compare GPU values and shapes with CPU and explicit
+independent nested-loop expectations. Device-independent IR/MSL checks prove
+index operations, guards, bindings and preservation. Direct contracts mutate
+metadata and index IR, check target overflow without huge allocations, and
+exercise unequal-buffer overlap/lifetime/output canaries on actual Metal.
+See [M3-C evidence](m3-c-acceptance.md) and [M3-D evidence](m3-d-acceptance.md).
 
-GPU broadcasting, arbitrary strides/views, floats, reductions, caches and
-persistent execution sessions are outside this feature.
+Rank >2, arbitrary strides/views, floats, reductions, caches and persistent
+execution sessions remain outside this feature. Full M3 acceptance is separate.

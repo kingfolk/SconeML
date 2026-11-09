@@ -5,12 +5,13 @@
 #include "src/tensor/MetalRuntime.h"
 
 namespace sconeml {
-// Verify the production Linalg/wrapper envelope and target bounds. M3-C allows
-// identical shapes only, including semantically identity singleton axes.
+// Verify the production Linalg/wrapper envelope, broadcast projections and
+// checked per-input/output target counts.
 // Throws before device access; empty calls still validate supported shapes.
 tensor::MetalKernelLayout validateShapedTensorGPU(mlir::ModuleOp module);
-// Extract scalar IR through the existing verified TensorMap device path. Does
-// not modify the host module. Shape/count metadata is attached to device IR.
+// Extract scalar IR into a guarded GPU map with verified same-index or
+// normalized broadcast loads. The source is unchanged; device metadata owns
+// input/output shapes and counts.
 mlir::FailureOr<mlir::OwningOpRef<mlir::ModuleOp>>
 lowerShapedTensorToGPU(mlir::ModuleOp module);
 } // namespace sconeml

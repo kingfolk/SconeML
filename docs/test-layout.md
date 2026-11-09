@@ -12,9 +12,13 @@ Paths below are relative to `test/`.
 
 | File | Purpose | Cases |
 | --- | --- | ---: |
-| [shaped_gpu/semantics.ml](../test/shaped_gpu/semantics.ml) | Same-shape rank-1/rank-2 Metal, metadata/MSL structure, ownership fixtures and empty calls | 16 |
+| [broadcast_gpu/semantics.ml](../test/broadcast_gpu/semantics.ml) | Independent GPU broadcast results, binding permutations, singleton identity and index IR/MSL | 21 |
+| [broadcast_gpu/empty.ml](../test/broadcast_gpu/empty.ml) | Broadcast 0/1 rules, nonempty inputs with empty output and constant expressions | 8 |
+| [broadcast_gpu/launch-boundaries.ml](../test/broadcast_gpu/launch-boundaries.ml) | Signed nonsquare broadcasts across widths 1/4/32 | 15 |
+| [broadcast_gpu/invalid.ml](../test/broadcast_gpu/invalid.ml) | Incompatible axes and validation before empty/device skips | 6 |
+| [shaped_gpu/semantics.ml](../test/shaped_gpu/semantics.ml) | Same-shape rank-1/rank-2 Metal, metadata/MSL structure, ownership fixtures and empty calls | 21 |
 | [shaped_gpu/launch-boundaries.ml](../test/shaped_gpu/launch-boundaries.ml) | Independent signed data across explicit threadgroup widths and matrix lengths | 10 |
-| [shaped_gpu/invalid.ml](../test/shaped_gpu/invalid.ml) | Reject GPU broadcasting and invalid syntax, shapes or launch bounds before device skips | 9 |
+| [shaped_gpu/invalid.ml](../test/shaped_gpu/invalid.ml) | Reject invalid syntax, shapes or launch bounds before device skips | 4 |
 | [shaped_input/same_shape.ml](../test/shaped_input/same_shape.ml) | Rank-1/rank-2 CPU maps, ownership fixtures, empty shapes and Linalg structure | 14 |
 | [shaped_input/broadcast/semantics.ml](../test/shaped_input/broadcast/semantics.ml) | Independent broadcast oracle, row/column/outer indexing, binding orders and signed data | 25 |
 | [shaped_input/broadcast/empty.ml](../test/shaped_input/broadcast/empty.ml) | Zero/singleton broadcasting, empty output with nonempty inputs | 8 |

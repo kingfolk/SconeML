@@ -720,3 +720,208 @@ runs:
 cpu
 *)
 a + b
+
+(* @case row *)
+(* @test
+version: 1
+input: source
+runs:
+  - name: cpu
+    pipeline: shaped-input-cpu
+    arguments:
+      - name: a
+        values: [0, 1, 2, 3, 4, 5]
+        shape: [2, 3]
+      - name: b
+        values: [0, 1, 2]
+        shape: [3]
+  - name: metal
+    pipeline: shaped-input-metal
+    arguments:
+      - name: a
+        values: [0, 1, 2, 3, 4, 5]
+        shape: [2, 3]
+      - name: b
+        values: [0, 1, 2]
+        shape: [3]
+*)
+(* @assert:cpu:result
+[0, 2, 4, 3, 5, 7]
+*)
+(* @assert:cpu:shape
+[2, 3]
+*)
+(* @assert:metal:result
+[0, 2, 4, 3, 5, 7]
+*)
+(* @assert:metal:shape
+[2, 3]
+*)
+(* @assert:metal:compare
+cpu
+*)
+a + b
+
+(* @case column *)
+(* @test
+version: 1
+input: source
+runs:
+  - name: cpu
+    pipeline: shaped-input-cpu
+    arguments:
+      - name: a
+        values: [0, 1, 2, 3, 4, 5]
+        shape: [2, 3]
+      - name: b
+        values: [0, 1]
+        shape: [2, 1]
+  - name: metal
+    pipeline: shaped-input-metal
+    arguments:
+      - name: a
+        values: [0, 1, 2, 3, 4, 5]
+        shape: [2, 3]
+      - name: b
+        values: [0, 1]
+        shape: [2, 1]
+*)
+(* @assert:cpu:result
+[0, 1, 2, 4, 5, 6]
+*)
+(* @assert:cpu:shape
+[2, 3]
+*)
+(* @assert:metal:result
+[0, 1, 2, 4, 5, 6]
+*)
+(* @assert:metal:shape
+[2, 3]
+*)
+(* @assert:metal:compare
+cpu
+*)
+a + b
+
+(* @case outer *)
+(* @test
+version: 1
+input: source
+runs:
+  - name: cpu
+    pipeline: shaped-input-cpu
+    arguments:
+      - name: a
+        values: [0, 1]
+        shape: [2, 1]
+      - name: b
+        values: [0, 1, 2]
+        shape: [1, 3]
+  - name: metal
+    pipeline: shaped-input-metal
+    arguments:
+      - name: a
+        values: [0, 1]
+        shape: [2, 1]
+      - name: b
+        values: [0, 1, 2]
+        shape: [1, 3]
+*)
+(* @assert:cpu:result
+[0, 1, 2, 1, 2, 3]
+*)
+(* @assert:cpu:shape
+[2, 3]
+*)
+(* @assert:metal:result
+[0, 1, 2, 1, 2, 3]
+*)
+(* @assert:metal:shape
+[2, 3]
+*)
+(* @assert:metal:compare
+cpu
+*)
+a + b
+
+(* @case rank-mismatch *)
+(* @test
+version: 1
+input: source
+runs:
+  - name: cpu
+    pipeline: shaped-input-cpu
+    arguments:
+      - name: a
+        values: [0, 1, 2]
+        shape: [3]
+      - name: b
+        values: [0, 1, 2]
+        shape: [1, 3]
+  - name: metal
+    pipeline: shaped-input-metal
+    arguments:
+      - name: a
+        values: [0, 1, 2]
+        shape: [3]
+      - name: b
+        values: [0, 1, 2]
+        shape: [1, 3]
+*)
+(* @assert:cpu:result
+[0, 2, 4]
+*)
+(* @assert:cpu:shape
+[1, 3]
+*)
+(* @assert:metal:result
+[0, 2, 4]
+*)
+(* @assert:metal:shape
+[1, 3]
+*)
+(* @assert:metal:compare
+cpu
+*)
+a + b
+
+(* @case empty-broadcast *)
+(* @test
+version: 1
+input: source
+runs:
+  - name: cpu
+    pipeline: shaped-input-cpu
+    arguments:
+      - name: a
+        values: []
+        shape: [0, 3]
+      - name: b
+        values: [0, 1, 2]
+        shape: [1, 3]
+  - name: metal
+    pipeline: shaped-input-metal
+    arguments:
+      - name: a
+        values: []
+        shape: [0, 3]
+      - name: b
+        values: [0, 1, 2]
+        shape: [1, 3]
+*)
+(* @assert:cpu:result
+[]
+*)
+(* @assert:cpu:shape
+[0, 3]
+*)
+(* @assert:metal:result
+[]
+*)
+(* @assert:metal:shape
+[0, 3]
+*)
+(* @assert:metal:compare
+cpu
+*)
+a + b
