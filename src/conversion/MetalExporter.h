@@ -5,6 +5,8 @@
 #include "mlir/Support/LogicalResult.h"
 #include <string>
 #include <cstddef>
+#include <optional>
+#include "src/tensor/MetalRuntime.h"
 
 namespace sconeml {
 
@@ -12,6 +14,7 @@ struct MetalKernelSource {
   std::string source;
   std::string entrypoint;
   std::size_t inputCount = 1;
+  std::optional<tensor::MetalKernelLayout> shapedLayout;
 };
 
 // Export the verified one-dimensional map kernel produced by LowerTensorToGPU.

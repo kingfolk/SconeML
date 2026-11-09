@@ -1,6 +1,7 @@
 #include "test/runner/Pipelines.h"
 #include "src/conversion/ClosureConversion.h"
 #include "src/conversion/LowerTensorToGPU.h"
+#include "src/conversion/LowerShapedTensorToGPU.h"
 #include "src/conversion/LowerTensorToSCF.h"
 #include "src/conversion/LowerToLLVM.h"
 #include "src/conversion/MetalExporter.h"
@@ -83,7 +84,7 @@ Output execute(const TestCase &test, const Run &run, bool disableMetal) {
         return mlir::success();
       });
   try {
-    if (run.pipeline == "shaped-input-ir" || run.pipeline == "shaped-input-cpu") {
+    if (run.pipeline.starts_with("shaped-input-")) {
       output.stage = "frontend";
       std::vector<sconeml::tensor::ShapedTensorArgumentSpec> specs;
       std::vector<sconeml::tensor::ShapedTensorArgument> arguments;
@@ -96,11 +97,45 @@ Output execute(const TestCase &test, const Run &run, bool disableMetal) {
       sconeml::tensor::translateShapedTensorExpression(*module, test.program, specs);
       if (run.pipeline == "shaped-input-ir") {
         output.ir = print(*module);
-      } else {
+      } else if (run.pipeline == "shaped-input-cpu") {
         output.stage = "cpu-execute";
         auto result = sconeml::tensor::runShapedTensorCPU(test.program, arguments, &output.ir);
         output.number = Number{true, std::move(result.values)};
         output.shape = std::move(result.shape);
+      } else {
+        output.stage = "gpu-lowering";
+        auto layout = sconeml::validateShapedTensorGPU(*module);
+        std::vector<size_t> lengths;
+        for (const auto &argument : arguments) lengths.push_back(argument.values.size());
+        sconeml::tensor::planShapedMetalLaunch(layout, lengths, layout.outputElementCount,
+            layout.outputElementCount, {run.threadsPerThreadgroup.value_or(0)});
+        if (run.pipeline == "shaped-input-metal") {
+          output.stage = "metal-execute";
+          if (layout.outputElementCount && (disableMetal || !sconeml::tensor::gpuIsAvailable())) {
+            output.skipped = true;
+            output.diagnostic = "Metal device unavailable or disabled";
+            return output;
+          }
+          auto result = sconeml::tensor::runShapedTensorGPU(test.program, arguments, &output.text,
+              {run.threadsPerThreadgroup.value_or(0)});
+          output.number = Number{true, std::move(result.values)};
+          output.shape = std::move(result.shape);
+        } else {
+          const auto before = print(*module);
+          auto device = sconeml::lowerShapedTensorToGPU(*module);
+          if (mlir::failed(device)) return output;
+          output.ir = print(**device);
+          output.sourceUnchanged = before == print(*module);
+          if (run.pipeline == "shaped-input-msl") {
+            output.stage = "msl-export";
+            const auto beforeExport = print(**device);
+            auto exported = sconeml::exportMetalKernel(**device);
+            if (mlir::failed(exported)) return output;
+            output.text = exported->source;
+            output.entrypoint = exported->entrypoint;
+            output.sourceUnchanged = *output.sourceUnchanged && beforeExport == print(**device);
+          }
+        }
       }
       output.success = true;
       return output;

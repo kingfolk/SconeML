@@ -1,5 +1,6 @@
 #include "src/tensor/GPURunner.h"
 #include "src/conversion/LowerTensorToGPU.h"
+#include "src/conversion/LowerShapedTensorToGPU.h"
 #include "src/conversion/MetalExporter.h"
 #include "src/dialect/LetAlgDialect.h"
 #include "src/tensor/MetalRuntime.h"
@@ -136,6 +137,37 @@ std::vector<int32_t> runTensorGPU(const std::string &expression,
     inputs.push_back(argument.values);
   return executeMap(findSingleMap(*module), inputs, gpuSource, options);
 }
+ShapedTensorResult runShapedTensorGPU(
+    const std::string &expression, std::span<const ShapedTensorArgument> arguments,
+    std::string *gpuSource, MetalLaunchOptions options) {
+  if (gpuSource) gpuSource->clear();
+  std::vector<ShapedTensorArgumentSpec> specs;
+  std::vector<MetalInput> inputs;
+  for (const auto &argument : arguments) {
+    specs.push_back({argument.name, argument.values.size(), argument.shape});
+    inputs.push_back(argument.values);
+  }
+  auto context = makeGPUContext();
+  mlir::OwningOpRef<mlir::ModuleOp> module = mlir::ModuleOp::create(mlir::UnknownLoc::get(context.get()));
+  auto shape = translateShapedTensorExpression(*module, expression, specs);
+  auto layout = sconeml::validateShapedTensorGPU(*module);
+  std::vector<size_t> lengths;
+  for (auto input : inputs) lengths.push_back(input.size());
+  planShapedMetalLaunch(layout, lengths, layout.outputElementCount, layout.outputElementCount, options);
+  ShapedTensorResult result{{}, std::move(shape)};
+  if (!layout.outputElementCount) return result;
+  auto device = sconeml::lowerShapedTensorToGPU(*module);
+  if (mlir::failed(device)) throw std::runtime_error("shaped GPU lowering failed");
+  auto kernel = sconeml::exportMetalKernel(**device);
+  if (mlir::failed(kernel) || !kernel->shapedLayout)
+    throw std::runtime_error("shaped Metal export failed");
+  if (gpuSource) *gpuSource = kernel->source;
+  result.values.resize(layout.outputElementCount);
+  runShapedMetalKernel(kernel->source, kernel->entrypoint, *kernel->shapedLayout,
+      inputs, result.values, layout.outputElementCount, options);
+  return result;
+}
+
 bool gpuIsAvailable() { return metalIsAvailable(); }
 std::string gpuName() { return metalDeviceName(); }
 } // namespace sconeml::tensor
