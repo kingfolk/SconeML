@@ -119,7 +119,8 @@ else()
   set(SCONEML_GPU_RUNTIME src/tensor/MetalRuntimeStub.cpp)
 endif()
 # Pipeline libraries are also consumed by the unified test runner.
-add_library(SconeMLTensorGPU STATIC src/conversion/LowerTensorToGPU.cpp)
+add_library(SconeMLTensorGPU STATIC src/conversion/LowerTensorToGPU.cpp
+  src/conversion/LowerShapedTensorToGPU.cpp)
 add_dependencies(SconeMLTensorGPU LetAlgDialectIncGen)
 target_link_libraries(SconeMLTensorGPU PUBLIC
   MLIR)
@@ -230,7 +231,34 @@ target_compile_options(shaped_cpu_contracts PRIVATE -fexceptions)
 add_dependencies(shaped_cpu_contracts LetAlgDialectIncGen)
 target_link_libraries(shaped_cpu_contracts PRIVATE SconeMLTestSpec MLIR MLIRExecutionEngine)
 
+function(add_shaped_gpu_contract_target target runtime)
+  add_llvm_executable(${target}
+    test/runner/ShapedGPUContracts.cpp
+    src/tensor/GPURunner.cpp
+    src/tensor/TensorFrontend.cpp
+    src/tensor/MetalLaunch.cpp
+    src/dialect/LetAlgDialect.cpp
+    ${runtime})
+  target_compile_options(${target} PRIVATE -fexceptions)
+  add_dependencies(${target} LetAlgDialectIncGen)
+  target_link_libraries(${target} PRIVATE SconeMLTestSpec SconeMLTensorGPU SconeMLMetalExporter MLIR)
+endfunction()
+add_shaped_gpu_contract_target(shaped_gpu_contracts ${SCONEML_GPU_RUNTIME})
+if(APPLE)
+  target_link_libraries(shaped_gpu_contracts PRIVATE "-framework Foundation" "-framework Metal")
+else()
+  target_compile_definitions(shaped_gpu_contracts PRIVATE SCONEML_EXPECT_METAL_STUB)
+endif()
+add_shaped_gpu_contract_target(shaped_gpu_stub_contracts src/tensor/MetalRuntimeStub.cpp)
+target_compile_definitions(shaped_gpu_stub_contracts PRIVATE SCONEML_EXPECT_METAL_STUB)
+
 enable_testing()
+add_test(NAME shaped_gpu_contracts COMMAND shaped_gpu_contracts
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/shaped_gpu/semantics.ml)
+add_test(NAME shaped_gpu_stub_contracts COMMAND shaped_gpu_stub_contracts
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/shaped_gpu/semantics.ml)
+add_test(NAME shaped_gpu_reference_fixtures COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate_shaped_gpu.py --check)
 add_test(NAME shaped_cpu_contracts COMMAND shaped_cpu_contracts
   ${CMAKE_CURRENT_SOURCE_DIR}/test/shaped_input/same_shape.ml
   ${CMAKE_CURRENT_SOURCE_DIR}/test/shaped_input/broadcast/semantics.ml

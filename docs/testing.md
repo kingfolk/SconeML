@@ -10,7 +10,7 @@ the matching file.
 
 ```sh
 cmake -S . -B build
-cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts gpu_input_contracts gpu_input_stub_contracts grouped_spec_checks shaped_cpu_contracts -j3
+cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts gpu_input_contracts gpu_input_stub_contracts grouped_spec_checks shaped_cpu_contracts shaped_gpu_contracts shaped_gpu_stub_contracts -j3
 ctest --test-dir build --output-on-failure
 ```
 
@@ -187,6 +187,26 @@ broadcast fixtures without writing. Regenerate only those fixtures with
 `python3 test/reference/generate_broadcast.py`; use `--check` to verify. See the
 [API contract](shaped-tensor-cpu.md), [M3-A evidence](m3-a-acceptance.md) and
 [M3-B evidence](m3-b-acceptance.md).
+
+## Shaped GPU source tests
+
+`shaped-input-metal` calls the production `runShapedTensorGPU` API and supports
+`result`, `shape`, `compare`, MSL text checks and `threads-per-group`.
+`shaped-input-gpu-ir` extracts shape-specialized device IR;
+`shaped-input-msl` also exports MSL. These device-independent adapters accept
+`ir-check` and `source-unchanged`; the MSL adapter also accepts text checks and
+`entrypoint`. All require source input with per-argument shape and values.
+
+GPU target validation reports at `gpu-lowering`, before any device skip or
+empty early return. The current feature requires identical shapes; compatible
+broadcast shapes explicitly fail. Strict Metal policy applies to every nonempty
+GPU execution. Empty same-shape calls succeed without a device and emit no MSL.
+`shaped_gpu_contracts` and `shaped_gpu_stub_contracts` check extraction/export,
+metadata lifetime/corruption, empty/unavailable behavior and direct ownership.
+`shaped_gpu_reference_fixtures` uses the independent nested-loop oracle and
+checks exact generated contents read-only. Regenerate with
+`python3 test/reference/generate_shaped_gpu.py`, or add `--check` to verify.
+See [usage](shaped-tensor-metal.md) and [M3-C evidence](m3-c-acceptance.md).
 
 ## IR format
 

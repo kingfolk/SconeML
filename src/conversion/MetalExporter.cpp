@@ -10,6 +10,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include <iterator>
+#include <limits>
 
 namespace sconeml {
 namespace {
@@ -273,19 +274,79 @@ mlir::FailureOr<MetalKernelSource> exportMetalKernel(mlir::ModuleOp module) {
   llvm::raw_string_ostream stream(result.source);
   auto &entry = (*kernel).getBody().front();
   result.inputCount = entry.getNumArguments() - 2;
+  const auto shapedAttr = module->getAttr("sconeml.shaped");
+  const auto marker = (*kernel)->getAttr("sconeml.shaped_kernel");
+  if (static_cast<bool>(shapedAttr) != static_cast<bool>(marker) ||
+      (marker && !mlir::isa<mlir::UnitAttr>(marker))) {
+    reject(module, "invalid shaped kernel metadata marker");
+    return mlir::failure();
+  }
+  if (auto attr = shapedAttr) {
+    auto metadata = mlir::dyn_cast<mlir::DictionaryAttr>(attr);
+    auto shape = metadata ? metadata.getAs<mlir::DenseI64ArrayAttr>("shape")
+                          : mlir::DenseI64ArrayAttr();
+    auto counts = metadata
+                      ? metadata.getAs<mlir::DenseI64ArrayAttr>("input_counts")
+                      : mlir::DenseI64ArrayAttr();
+    auto output = metadata ? metadata.getAs<mlir::IntegerAttr>("output_count")
+                           : mlir::IntegerAttr();
+    auto fail = [&]() {
+      reject(module, "invalid shaped kernel metadata");
+      return mlir::failure();
+    };
+    if (!metadata || metadata.size() != 3 || !shape || !counts || !output ||
+        !output.getType().isSignlessInteger(64) || shape.size() < 1 ||
+        shape.size() > 2 || counts.size() != result.inputCount)
+      return fail();
+    uint64_t product = 1;
+    const auto hostLimit = std::min<uint64_t>(
+        std::vector<int32_t>().max_size(),
+        std::min<uint64_t>(std::numeric_limits<int64_t>::max(),
+                           std::numeric_limits<size_t>::max() /
+                               sizeof(int32_t)));
+    // All dimensions must be validated even after a zero extent. Multiply in
+    // reverse order to also bound canonical strides, as on the host frontend.
+    for (auto extent : shape.asArrayRef())
+      if (extent < 0)
+        return fail();
+    for (size_t axis = shape.size(); axis-- > 0;) {
+      const auto extent = static_cast<uint64_t>(shape[axis]);
+      if (extent && product > hostLimit / extent)
+        return fail();
+      product *= extent;
+    }
+    if (product > std::numeric_limits<uint32_t>::max() || output.getInt() < 0 ||
+        static_cast<uint64_t>(output.getInt()) != product)
+      return fail();
+    tensor::MetalKernelLayout layout;
+    layout.outputElementCount = product;
+    for (auto count : counts.asArrayRef()) {
+      // Same-index kernels require identical per-buffer counts in M3-C.
+      if (count < 0 || static_cast<uint64_t>(count) != product)
+        return fail();
+      layout.inputElementCounts.push_back(count);
+    }
+    result.shapedLayout = std::move(layout);
+  }
   Emitter emitter(stream);
   stream << "#include <metal_stdlib>\nusing namespace metal;\n\n";
   for (unsigned i = 0; i < result.inputCount; ++i) {
-    auto name = result.inputCount == 1 ? std::string("input") : "input" + std::to_string(i);
+    auto name = result.inputCount == 1 ? std::string("input")
+                                       : "input" + std::to_string(i);
     stream << (i == 0 ? "kernel void tensor_map(" : "                       ")
            << "device const uint *" << name << " [[buffer(" << i << ")]],\n";
     emitter.names[entry.getArgument(i)] = name;
   }
-  stream << "                       device uint *output [[buffer(" << result.inputCount << ")]],\n"
-         << "                       constant uint &count [[buffer(" << result.inputCount + 1 << ")]],\n"
-         << "                       uint3 group_id [[threadgroup_position_in_grid]],\n"
-         << "                       uint3 group_size [[threads_per_threadgroup]],\n"
-         << "                       uint3 local_id [[thread_position_in_threadgroup]]) {\n";
+  stream << "                       device uint *output [[buffer("
+         << result.inputCount << ")]],\n"
+         << "                       constant uint &count [[buffer("
+         << result.inputCount + 1 << ")]],\n"
+         << "                       uint3 group_id "
+            "[[threadgroup_position_in_grid]],\n"
+         << "                       uint3 group_size "
+            "[[threads_per_threadgroup]],\n"
+         << "                       uint3 local_id "
+            "[[thread_position_in_threadgroup]]) {\n";
   emitter.names[entry.getArgument(result.inputCount)] = "output";
   emitter.names[entry.getArgument(result.inputCount + 1)] = "count";
   emitter.emitBlock(entry, 2);

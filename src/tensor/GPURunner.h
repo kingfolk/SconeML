@@ -18,6 +18,12 @@ std::vector<int32_t> runTensorLiteralGPU(const std::string &source,
 std::vector<int32_t> runTensorGPU(
     const std::string &expression, std::span<const TensorArgument> arguments,
     std::string *gpuSource = nullptr, MetalLaunchOptions options = {});
+// Shape-specialized same-shape rank-1/rank-2 i32 Metal execution. Broadcast
+// shapes are explicitly rejected until GPU broadcast indexing is implemented.
+// Empty output validates but emits no kernel/MSL and needs no device.
+ShapedTensorResult runShapedTensorGPU(
+    const std::string &expression, std::span<const ShapedTensorArgument> arguments,
+    std::string *gpuSource = nullptr, MetalLaunchOptions options = {});
 bool gpuIsAvailable();
 std::string gpuName();
 

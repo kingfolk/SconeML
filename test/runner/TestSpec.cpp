@@ -89,7 +89,8 @@ bool knownPipeline(const std::string &name) {
       "scalar-cpu",       "tensor-metal",    "legacy-letalg",
       "legacy-cpu",       "tensor-cpu-ir",   "tensor-metal-ir",
       "tensor-input-cpu", "tensor-input-ir", "tensor-input-metal",
-      "shaped-input-ir", "shaped-input-cpu"};
+      "shaped-input-ir", "shaped-input-cpu", "shaped-input-metal",
+      "shaped-input-gpu-ir", "shaped-input-msl"};
   return names.contains(name);
 }
 
@@ -98,15 +99,21 @@ static bool numericPipeline(const std::string &pipeline) {
          pipeline == "legacy-cpu" || pipeline == "tensor-metal" ||
          pipeline == "tensor-cpu-ir" || pipeline == "tensor-metal-ir" ||
          pipeline == "tensor-input-cpu" || pipeline == "tensor-input-metal" ||
-         pipeline == "shaped-input-cpu";
+         pipeline == "shaped-input-cpu" || pipeline == "shaped-input-metal";
 }
 
 static bool supports(const std::string &pipeline, const std::string &kind) {
   if (kind == "shape")
-    return pipeline == "shaped-input-cpu";
+    return pipeline == "shaped-input-cpu" || pipeline == "shaped-input-metal";
   if ((kind == "ir-check" || kind == "ir-equal") &&
-      (pipeline == "shaped-input-ir" || pipeline == "shaped-input-cpu"))
+      (pipeline == "shaped-input-ir" || pipeline == "shaped-input-cpu" ||
+       pipeline == "shaped-input-gpu-ir" || pipeline == "shaped-input-msl"))
     return true;
+  if ((kind == "text-check" || kind == "text-equal") &&
+      (pipeline == "shaped-input-msl" || pipeline == "shaped-input-metal")) return true;
+  if (kind == "source-unchanged" &&
+      (pipeline == "shaped-input-gpu-ir" || pipeline == "shaped-input-msl")) return true;
+  if (kind == "entrypoint" && pipeline == "shaped-input-msl") return true;
   if (kind == "entrypoint")
     return pipeline == "tensor-msl" || pipeline == "metal-compile" ||
            pipeline == "tensor-metal-ir";
@@ -343,7 +350,7 @@ static TestCase parseSingleCase(const std::string &path,
     require(!run.name.empty() && names.insert(run.name).second,
             "empty or duplicate run name: " + run.name);
     require(knownPipeline(run.pipeline), "unknown pipeline: " + run.pipeline);
-    const bool shaped = run.pipeline == "shaped-input-ir" || run.pipeline == "shaped-input-cpu";
+    const bool shaped = run.pipeline.starts_with("shaped-input-");
     const bool sourceInputs = shaped || run.pipeline == "tensor-input-cpu" ||
                               run.pipeline == "tensor-input-ir" ||
                               run.pipeline == "tensor-input-metal";
@@ -365,7 +372,7 @@ static TestCase parseSingleCase(const std::string &path,
     }
     require(!run.threadsPerThreadgroup || run.pipeline == "tensor-metal" ||
                 run.pipeline == "tensor-metal-ir" ||
-                run.pipeline == "tensor-input-metal",
+                run.pipeline == "tensor-input-metal" || run.pipeline == "shaped-input-metal",
             "threads-per-group is only supported by tensor-metal pipelines");
     require(!run.threadsPerThreadgroup || *run.threadsPerThreadgroup > 0,
             "threads-per-group must be positive");

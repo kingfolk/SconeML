@@ -65,6 +65,39 @@ int main() {
       planMetalLaunch(1, 1, 1, {static_cast<std::size_t>(u32Max) + 1});
     });
 
+    // Shape-specialized metadata fixes count/arity and every buffer's size.
+    MetalKernelLayout shaped{{2,3},6};
+    std::array<size_t,2> sizes{2,3};
+    auto shapedLaunch = planShapedMetalLaunch(shaped, sizes, 6, 6, {4}, 64, 1024);
+    require(shapedLaunch.inputByteCounts == std::vector<size_t>({8,12}) &&
+                shapedLaunch.output.byteCount == 24 && shapedLaunch.output.threadgroupCount == 2,
+            "shaped allocation sizes/launch geometry differ from metadata");
+    rejects("output count", [&] { planShapedMetalLaunch(shaped, sizes, 6, 5); });
+    std::array<size_t,2> wrongSizes{2,2};
+    rejects("input length", [&] { planShapedMetalLaunch(shaped, wrongSizes, 6, 6); });
+    wrongSizes = {2,4};
+    rejects("input length", [&] { planShapedMetalLaunch(shaped, wrongSizes, 6, 6); });
+    rejects("input arity", [&] { planShapedMetalLaunch(shaped, {}, 6, 6); });
+    rejects("buffer capacity", [&] { planShapedMetalLaunch(shaped, sizes, 5, 6); });
+    rejects("byte size exceeds device limit", [&] { planShapedMetalLaunch(shaped, sizes, 6, 6, {4}, 64, 23); });
+    MetalKernelLayout largerInput{{10,1},1};
+    std::array<size_t,2> bigger{10,1};
+    rejects("byte size exceeds device limit", [&] { planShapedMetalLaunch(largerInput, bigger, 1, 1, {1}, 64, 39); });
+    MetalKernelLayout hugeInput{{static_cast<size_t>(u32Max)+1},0};
+    std::array<size_t,1> hugeSize{static_cast<size_t>(u32Max)+1};
+    rejects("element count", [&] { planShapedMetalLaunch(hugeInput, hugeSize, 0, 0); });
+    std::array<size_t,1> noInput{0};
+    rejects("nonempty output requires", [&] { planShapedMetalLaunch({{0},1}, noInput, 1, 1); });
+    // Empty output still validates nonempty input lengths and host byte bounds,
+    // but requires no device, valid source or entrypoint on real and stub runtimes.
+    std::array<int32_t,2> small{1,2};
+    std::array<MetalInput,2> zeroInputs{MetalInput{small}, MetalInput{}};
+    runShapedMetalKernel("invalid", "", {{2,0},0}, zeroInputs, {}, 0);
+    std::array<int32_t,1> untouched{777};
+    rejects("input length", [&] { runShapedMetalKernel("", "", {{1,0},0}, zeroInputs, untouched, 0); });
+    rejects("output count", [&] { runShapedMetalKernel("", "", {{2,0},1}, zeroInputs, untouched, 0); });
+    require(untouched[0] == 777, "rejected shaped launch modified host output");
+
     // Invalid source and no entrypoint are intentional: an empty runtime call
     // must return before compilation/device access, including on the stub.
     runMetalKernel("invalid Metal source", "", {}, {}, 0);

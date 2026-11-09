@@ -65,3 +65,12 @@ Metal allocation; read-only host inputs may alias. Output is always separate.
 The original single-input runMetalKernel signature wraps its span in a one-item
 list and delegates, preserving K=1 behavior and one launch implementation.
 See [multi-input maps](multi-input-tensor-map.md) for metadata and validation.
+
+## Shape-specialized launches
+
+The [shaped Metal API](shaped-tensor-metal.md) adds owned per-input counts and
+an expected output count from verified export metadata. `planShapedMetalLaunch`
+checks exact input lengths, output count/capacity and independent buffer byte
+limits; `runShapedMetalKernel` shares these checks between real and stub paths.
+Each real input allocation/copy uses its own count. Old flat functions preserve
+their requested-prefix semantics through the shared implementation.
