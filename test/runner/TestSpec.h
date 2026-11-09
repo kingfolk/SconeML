@@ -12,6 +12,7 @@ namespace sconeml::test {
 struct InputArgument {
   std::string name;
   std::vector<int32_t> values;
+  std::optional<std::vector<int64_t>> shape;
 };
 struct Run {
   std::string name;
@@ -51,6 +52,7 @@ TestCase readCase(const std::string &path, const std::string &name = "");
 TestCase parseCase(const std::string &path, const std::string &text,
                    const std::string &name = "");
 ExpectedError parseError(const std::string &text);
+std::vector<int64_t> parseShape(const std::string &text);
 Number parseNumber(const std::string &text);
 std::string formatNumber(const Number &number);
 bool knownPipeline(const std::string &name);

@@ -4,6 +4,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include <string>
 #include <span>
+#include <vector>
 
 namespace sconeml::tensor {
 // Populate and verify a module using the shared CPU/GPU frontend.
@@ -23,6 +24,19 @@ struct TensorArgumentSpec {
 void translateTensorExpression(mlir::ModuleOp module,
                                const std::string &expression,
                                std::span<const TensorArgumentSpec> arguments);
+struct ShapedTensorArgumentSpec {
+  std::string name;
+  std::size_t elementCount;
+  std::vector<int64_t> shape;
+};
+// Same-shape only; validates all arguments (including unused inputs) before IR
+// construction. Builds flat C-ABI buffers, canonical views and linalg.generic.
+void translateShapedTensorExpression(
+    mlir::ModuleOp module, const std::string &expression,
+    std::span<const ShapedTensorArgumentSpec> arguments);
+// Narrow production envelope validation, also used before CPU lowering.
+// Arbitrary Linalg, captures, output reads and noncanonical views are rejected.
+void validateShapedTensorExpression(mlir::ModuleOp module);
 }
 
 #endif

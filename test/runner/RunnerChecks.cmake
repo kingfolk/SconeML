@@ -343,3 +343,51 @@ read_source_case("${DATA_ROOT}/multi_input/errors/length-validation.ml" "empty-m
 file(WRITE "${SCRATCH}/grouped-no-device.ml" "(* @case empty *)\n${empty_case}\n(* @case error *)\n${error_case}")
 expect_success(grouped-no-device "4 passed, 0 skipped, 0 failed" --file "${SCRATCH}/grouped-no-device.ml" --no-metal --require-metal)
 message(STATUS "Grouped case selection, isolation, validation and device-policy contracts passed")
+
+# Shape metadata is mandatory only on shaped pipelines, and output shapes must
+# be asserted independently of flattened values.
+set(shaped [=[(* @test
+version: 1
+input: source
+runs:
+  - name: cpu
+    pipeline: shaped-input-cpu
+    arguments:
+      - name: a
+        values: [1, 2]
+        shape: [1, 2]
+*)
+(* @assert:cpu:result
+[2, 3]
+*)
+(* @assert:cpu:shape
+[1, 2]
+*)
+a + 1
+]=])
+file(WRITE "${SCRATCH}/shaped.ml" "${shaped}")
+expect_success(shaped "1 passed" --file "${SCRATCH}/shaped.ml" --no-metal)
+string(REPLACE "        shape: [1, 2]\n" "" changed "${shaped}")
+file(WRITE "${SCRATCH}/missing-shape.ml" "${changed}")
+expect_failure(missing-shape "shape is required" --file "${SCRATCH}/missing-shape.ml")
+string(REPLACE "pipeline: shaped-input-cpu" "pipeline: tensor-input-cpu" changed "${shaped}")
+file(WRITE "${SCRATCH}/flat-shape.ml" "${changed}")
+expect_failure(flat-shape "forbidden for flat" --file "${SCRATCH}/flat-shape.ml")
+string(REPLACE "@assert:cpu:shape\n[1, 2]" "@assert:cpu:shape\n[2, 1]" changed "${shaped}")
+file(WRITE "${SCRATCH}/wrong-shape.ml" "${changed}")
+expect_failure(wrong-shape "result shape differs" --file "${SCRATCH}/wrong-shape.ml")
+string(REPLACE "@assert:cpu:shape\n[1, 2]" "@assert:cpu:shape\n[]" changed "${shaped}")
+file(WRITE "${SCRATCH}/invalid-shape-assertion.ml" "${changed}")
+expect_failure(invalid-shape-assertion "shape assertion requires" --file "${SCRATCH}/invalid-shape-assertion.ml")
+set(shaped_compare_run [=[  - name: compared
+    pipeline: shaped-input-cpu
+    arguments:
+      - name: a
+        values: [1, 2]
+        shape: [2, 1]
+]=])
+string(REPLACE "*)\n(* @assert:cpu:result" "${shaped_compare_run}*)\n(* @assert:cpu:result" changed "${shaped}")
+string(APPEND changed "\n")
+string(REPLACE "a + 1" "(* @assert:compared:compare\ncpu\n*)\na + 1" changed "${changed}")
+file(WRITE "${SCRATCH}/shape-compare.ml" "${changed}")
+expect_failure(shape-compare "numeric result differs from run cpu" --file "${SCRATCH}/shape-compare.ml")

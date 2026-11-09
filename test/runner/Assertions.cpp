@@ -98,10 +98,13 @@ void checkAssertions(const TestCase &test, const Run &run, const Output &output,
                   (output.number ? formatNumber(*output.number)
                                  : "no numeric result") +
                   (output.number ? numericDifference(expected, *output.number) : ""));
+    } else if (assertion.kind == "shape") {
+      require(output.shape && *output.shape == parseShape(assertion.value),
+              "result shape differs from expected " + assertion.value);
     } else if (assertion.kind == "compare") {
       const auto &other = previous.at(assertion.value);
       require(other.success && other.number && output.number &&
-                  *other.number == *output.number,
+                  *other.number == *output.number && other.shape == output.shape,
               "numeric result differs from run " + assertion.value +
                   (other.number && output.number
                        ? numericDifference(*other.number, *output.number) : ""));

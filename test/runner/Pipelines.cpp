@@ -83,6 +83,28 @@ Output execute(const TestCase &test, const Run &run, bool disableMetal) {
         return mlir::success();
       });
   try {
+    if (run.pipeline == "shaped-input-ir" || run.pipeline == "shaped-input-cpu") {
+      output.stage = "frontend";
+      std::vector<sconeml::tensor::ShapedTensorArgumentSpec> specs;
+      std::vector<sconeml::tensor::ShapedTensorArgument> arguments;
+      for (const auto &argument : *run.arguments) {
+        specs.push_back({argument.name, argument.values.size(), *argument.shape});
+        arguments.push_back({argument.name, argument.values, *argument.shape});
+      }
+      mlir::OwningOpRef<mlir::ModuleOp> module =
+          mlir::ModuleOp::create(mlir::UnknownLoc::get(context.get()));
+      sconeml::tensor::translateShapedTensorExpression(*module, test.program, specs);
+      if (run.pipeline == "shaped-input-ir") {
+        output.ir = print(*module);
+      } else {
+        output.stage = "cpu-execute";
+        auto result = sconeml::tensor::runShapedTensorCPU(test.program, arguments, &output.ir);
+        output.number = Number{true, std::move(result.values)};
+        output.shape = std::move(result.shape);
+      }
+      output.success = true;
+      return output;
+    }
     if (run.pipeline == "tensor-input-ir" || run.pipeline == "tensor-input-cpu" ||
         run.pipeline == "tensor-input-metal") {
       output.stage = "frontend";

@@ -18,6 +18,12 @@ std::vector<int32_t> runTensorCPU(
     const std::string &expression, std::span<const TensorArgument> arguments,
     std::string *loweredLLVMIR = nullptr);
 
+// Same-shape rank-1/rank-2 i32 execution. No broadcasting. Empty results still
+// validate source and all shapes, then return without JIT (and with empty dump).
+ShapedTensorResult runShapedTensorCPU(
+    const std::string &expression, std::span<const ShapedTensorArgument> arguments,
+    std::string *loweredLLVMIR = nullptr);
+
 } // namespace sconeml::tensor
 
 #endif

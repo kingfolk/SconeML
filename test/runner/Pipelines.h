@@ -10,6 +10,7 @@ struct Output {
   bool success = false, skipped = false;
   std::string stage, diagnostic, ir, text, effects, entrypoint;
   std::optional<Number> number;
+  std::optional<std::vector<int64_t>> shape;
   std::optional<bool> sourceUnchanged;
 };
 std::unique_ptr<mlir::MLIRContext> makeContext();

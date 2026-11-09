@@ -10,7 +10,7 @@ the matching file.
 
 ```sh
 cmake -S . -B build
-cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts gpu_input_contracts gpu_input_stub_contracts grouped_spec_checks -j3
+cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts gpu_input_contracts gpu_input_stub_contracts grouped_spec_checks shaped_cpu_contracts -j3
 ctest --test-dir build --output-on-failure
 ```
 
@@ -141,6 +141,45 @@ selecting. `grouped_spec_contracts` checks lexical discovery, source offsets and
 reader behavior without linking a compiler or GPU runtime. `runner_contracts`
 checks selection, independent inputs/results, failure continuation, prevalidation,
 and strict/empty/error device policies. See [M3-T acceptance](m3-t-acceptance.md).
+
+## Shaped CPU source tests
+
+`shaped-input-ir` checks the production Linalg frontend. `shaped-input-cpu`
+executes the public `runShapedTensorCPU` API and supports `result`, `shape`,
+`compare` and LLVM `ir-check` assertions. Each argument requires `shape: [R, C]`
+or `shape: [N]` alongside its name and row-major values. Shape fields are forbidden
+on existing flat pipelines, so a misspelled pipeline cannot ignore shape metadata.
+`shape` assertions use signed 64-bit extents and require rank 1 or 2. Numeric
+comparisons also compare the presence and contents of output shapes. Semantic
+shape errors belong to the frontend and can be asserted with `error`; missing
+shape fields are configuration errors before any selected run executes.
+
+```ocaml
+(* @test
+version: 1
+input: source
+runs:
+  - name: cpu
+    pipeline: shaped-input-cpu
+    arguments:
+      - name: a
+        values: [1, 2, 3, 4, 5, 6]
+        shape: [2, 3]
+*)
+(* @assert:cpu:result
+[2, 3, 4, 5, 6, 7]
+*)
+(* @assert:cpu:shape
+[2, 3]
+*)
+a + 1
+```
+
+`shaped_cpu_contracts` checks ownership, overlapping input spans, input-value
+independence of IR, shape specialization, empty execution, flat API compatibility
+and rejection of mutated in-memory Linalg/wrapper IR. The programs and numeric
+expectations come from `test/shaped_input/same_shape.ml`. See the
+[API contract](shaped-tensor-cpu.md) and [M3-A evidence](m3-a-acceptance.md).
 
 ## IR format
 
