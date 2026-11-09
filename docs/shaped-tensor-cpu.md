@@ -131,3 +131,7 @@ structure and LLVM elimination. Direct API contracts add ownership, overlap,
 specialization and malformed in-memory IR checks. See
 [M3-A acceptance](m3-a-acceptance.md) and
 [M3-B acceptance](m3-b-acceptance.md) for recorded validation.
+
+The complete milestone gate is documented in [M3 acceptance](m3-acceptance.md),
+including the seeded matrix, mandatory shape/value test assertions, complete
+MSL expectations and retained malformed-IR/runtime/ownership contracts.

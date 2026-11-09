@@ -151,8 +151,14 @@ or `shape: [N]` alongside its name and row-major values. Shape fields are forbid
 on existing flat pipelines, so a misspelled pipeline cannot ignore shape metadata.
 Shaped CPU runs infer trailing-axis broadcasting across all declared inputs,
 including unused ones.
-`shape` assertions use signed 64-bit extents and require rank 1 or 2. Numeric
-comparisons also compare the presence and contents of output shapes. Semantic
+`shape` assertions use signed 64-bit extents and require rank 1 or 2. Every
+successful `shaped-input-cpu` or `shaped-input-metal` run must include an explicit
+`shape` assertion and either `result` or `compare`; `success`, text checks or
+flattened values alone cannot satisfy the numeric contract. A sole expected
+`error` assertion remains valid. This is checked before selection, device skips
+or pipeline execution, including unselected grouped cases. Existing flat test
+metadata is unchanged. Numeric comparisons also compare the presence and
+contents of output shapes. Semantic
 shape errors belong to the frontend and can be asserted with `error`; missing
 shape fields are configuration errors before any selected run executes.
 
@@ -215,6 +221,36 @@ The two direct GPU contract executables now take both
 `test/shaped_gpu/semantics.ml` and `test/broadcast_gpu/semantics.ml` as arguments.
 See [usage](shaped-tensor-metal.md), [M3-C evidence](m3-c-acceptance.md) and
 [M3-D evidence](m3-d-acceptance.md).
+
+## Full M3 acceptance
+
+`test/acceptance_m3/` closes the shaped milestone with 30 named cases / 64 runs
+in three files: seeded semantics, exact flattened grid boundaries and empty
+broadcasts. Grid widths 4/32/256 each exercise counts `1`, `W-1`, `W`, `W+1` and
+`2W+3`, while shape/arity choices are distributed rather than cross-multiplied.
+Inputs include MIN/MAX/-1/0/1 and independent full-width LCG streams with seed
+`0x5c0e0003`. An independent Python nested-loop oracle computes shape and
+wrapping i32 values without using production indexing or compiler output.
+
+Two complete, hand-authored MSL files in `test/reference/msl/` are embedded in
+the source cases as `text-equal` expectations. They cover every binding, scalar
+SSA value, guard and identity/row/column/singleton index, including unsigned
+semantics. They are never refreshed from backend output. `device` runs also
+check GPU IR and source preservation without requiring Metal.
+
+```sh
+python3 test/reference/generate_m3.py --check
+./build/tester --suite test/acceptance_m3 --require-metal
+./build/tester --file test/acceptance_m3/grid-boundaries.ml --case w256-n257 --run metal --require-metal
+```
+
+`shaped_acceptance_reference_fixtures` verifies oracle/data anchors and exact
+fixture contents/file set read-only. Regenerate fixtures with the same Python
+script without `--check`; intentional shader changes require explicit review
+and edits to the hand-authored MSL expectations. Existing shaped/flat API,
+malformed IR, runtime, stub and reference regressions remain required.
+See [M3 acceptance](m3-acceptance.md) for the complete requirement/evidence map,
+commands, actual device results and limits.
 
 ## IR format
 

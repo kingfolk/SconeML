@@ -297,6 +297,8 @@ add_test(NAME broadcast_reference_fixtures COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate_broadcast.py --check)
 add_test(NAME gpu_broadcast_reference_fixtures COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate_gpu_broadcast.py --check)
+add_test(NAME shaped_acceptance_reference_fixtures COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate_m3.py --check)
 add_test(NAME runner_contracts COMMAND ${CMAKE_COMMAND}
   -DRUNNER=$<TARGET_FILE:tester>
   -DDATA_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/test

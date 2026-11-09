@@ -388,9 +388,13 @@ set(shaped_compare_run [=[  - name: compared
 ]=])
 string(REPLACE "*)\n(* @assert:cpu:result" "${shaped_compare_run}*)\n(* @assert:cpu:result" changed "${shaped}")
 string(APPEND changed "\n")
-string(REPLACE "a + 1" "(* @assert:compared:compare\ncpu\n*)\na + 1" changed "${changed}")
+string(REPLACE "a + 1" "(* @assert:compared:compare\ncpu\n*)\n(* @assert:compared:shape\n[2, 1]\n*)\na + 1" changed "${changed}")
 file(WRITE "${SCRATCH}/shape-compare.ml" "${changed}")
 expect_failure(shape-compare "numeric result differs from run cpu" --file "${SCRATCH}/shape-compare.ml")
+string(REPLACE "shape: [2, 1]" "shape: [1, 2]" consistent "${changed}")
+string(REPLACE "@assert:compared:shape\n[2, 1]" "@assert:compared:shape\n[1, 2]" consistent "${consistent}")
+file(WRITE "${SCRATCH}/valid-shape-compare.ml" "${consistent}")
+expect_success(valid-shape-compare "2 passed" --file "${SCRATCH}/valid-shape-compare.ml")
 
 # Shaped GPU policy validates target and launch bounds before
 # device skips. Empty same-shape execution remains a strict no-device success.
@@ -409,3 +413,59 @@ expect_success(broadcast-empty-no-device "16 passed, 0 skipped, 0 failed" --no-m
   --file "${DATA_ROOT}/broadcast_gpu/empty.ml")
 expect_success(broadcast-errors-before-device "6 passed, 0 skipped, 0 failed" --no-metal --require-metal
   --file "${DATA_ROOT}/broadcast_gpu/invalid.ml")
+
+# Shape/value assertions form a single acceptance contract for successful
+# shaped CPU/Metal execution, including runs hidden by filters/device skips.
+string(REPLACE "(* @assert:cpu:shape\n[1, 2]\n*)\n" "" missing_result_shape "${shaped}")
+file(WRITE "${SCRATCH}/missing-result-shape.ml" "${missing_result_shape}")
+expect_config_failure(missing-result-shape "shaped execution requires shape"
+  --file "${SCRATCH}/missing-result-shape.ml")
+string(REPLACE "pipeline: shaped-input-cpu" "pipeline: shaped-input-metal" gpu_missing_shape "${missing_result_shape}")
+file(WRITE "${SCRATCH}/missing-metal-shape.ml" "${gpu_missing_shape}")
+expect_config_failure(missing-metal-shape "shaped execution requires shape"
+  --file "${SCRATCH}/missing-metal-shape.ml" --no-metal)
+string(REPLACE "(* @assert:cpu:result\n[2, 3]\n*)\n" "" changed "${shaped}")
+file(WRITE "${SCRATCH}/missing-shaped-values.ml" "${changed}")
+expect_config_failure(missing-shaped-values "result or compare assertions"
+  --file "${SCRATCH}/missing-shaped-values.ml")
+string(REPLACE "(* @assert:cpu:result\n[2, 3]\n*)" "(* @assert:cpu:success\ntrue\n*)" changed "${missing_result_shape}")
+file(WRITE "${SCRATCH}/shape-success-only.ml" "${changed}")
+expect_config_failure(shape-success-only "shaped execution requires shape"
+  --file "${SCRATCH}/shape-success-only.ml")
+file(WRITE "${SCRATCH}/filtered-bad-shape.ml" "(* @case valid *)\n${shaped}\n(* @case invalid *)\n${gpu_missing_shape}")
+expect_config_failure(filtered-bad-shape "shaped execution requires shape"
+  --file "${SCRATCH}/filtered-bad-shape.ml" --case valid --run cpu --no-metal)
+string(REPLACE "        shape:" "        shpae:" changed "${shaped}")
+file(WRITE "${SCRATCH}/unknown-shaped-field.ml" "${changed}")
+expect_config_failure(unknown-shaped-field "unknown key"
+  --file "${SCRATCH}/unknown-shaped-field.ml")
+string(REPLACE "    pipeline: shaped-input-cpu\n" "" changed "${shaped}")
+file(WRITE "${SCRATCH}/missing-shaped-pipeline.ml" "${changed}")
+expect_config_failure(missing-shaped-pipeline "missing required key 'pipeline'"
+  --file "${SCRATCH}/missing-shaped-pipeline.ml")
+set(wrong_shaped_stage [=[(* @test
+version: 1
+input: source
+runs:
+  - name: gpu
+    pipeline: shaped-input-metal
+    arguments:
+      - name: a
+        values: []
+        shape: [0, 3]
+*)
+(* @assert:gpu:error
+stage: metal-execute
+message: unknown tensor expression variable
+*)
+unknown
+]=])
+file(WRITE "${SCRATCH}/wrong-shaped-stage.ml" "${wrong_shaped_stage}")
+expect_failure(wrong-shaped-stage "Actual stage: frontend"
+  --file "${SCRATCH}/wrong-shaped-stage.ml" --no-metal --require-metal)
+
+expect_success(m3-empty-no-device "12 passed, 0 skipped, 0 failed" --no-metal --require-metal
+  --file "${DATA_ROOT}/acceptance_m3/empty.ml")
+expect_failure(m3-strict-device "required device unavailable" --no-metal --require-metal
+  --file "${DATA_ROOT}/acceptance_m3/semantics.ml" --case row-column-golden --run metal)
+message(STATUS "Shaped value/shape completeness, filtering, stage and M3 device-policy contracts passed")

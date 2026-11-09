@@ -88,7 +88,9 @@ ROCm, or SPIR-V backend is added. Shaped rank-1/rank-2 execution with trailing-a
 [shaped tensor API](docs/shaped-tensor-cpu.md). The
 [shaped Metal API](docs/shaped-tensor-metal.md) executes rank-1/rank-2 shapes
 with row, column, singleton and outer broadcasting on GPU. Reductions remain
-future work.
+future work. The [M3 acceptance record](docs/m3-acceptance.md)
+links the complete shape/value, indexing, bounds, ownership and device evidence,
+including exact grid boundaries and complete representative MSL checks.
 
 The [M1 acceptance matrix](docs/m1-acceptance.md) adds an independent 32-bit
 reference, reproducible source/IR fixtures and real CPU/Metal result checks.
