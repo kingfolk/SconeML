@@ -141,11 +141,11 @@ runs:
 *)
 (* @assert:cpu:error
 stage: frontend
-message: must have the same shape
+message: incompatible shaped tensor broadcast dimensions
 *)
 a + b
 
-(* @case broadcast-deferred *)
+(* @case rank1-trailing-axis-mismatch *)
 (* @test
 version: 1
 input: source
@@ -154,15 +154,15 @@ runs:
     pipeline: shaped-input-cpu
     arguments:
       - name: a
-        values: [1, 2, 3, 4]
-        shape: [2, 2]
+        values: [1, 2, 3, 4, 5, 6]
+        shape: [2, 3]
       - name: b
         values: [5, 6]
         shape: [2]
 *)
 (* @assert:cpu:error
 stage: frontend
-message: broadcasting is not supported yet
+message: incompatible shaped tensor broadcast dimensions
 *)
 a + b
 
@@ -196,15 +196,15 @@ runs:
     pipeline: shaped-input-cpu
     arguments:
       - name: a
-        values: [1]
-        shape: [1]
+        values: [1, 2]
+        shape: [2]
       - name: b
         values: []
         shape: [0]
 *)
 (* @assert:cpu:error
 stage: frontend
-message: must have the same shape
+message: incompatible shaped tensor broadcast dimensions
 *)
 7
 
@@ -225,7 +225,7 @@ runs:
 *)
 (* @assert:cpu:error
 stage: frontend
-message: must have the same shape
+message: incompatible shaped tensor broadcast dimensions
 *)
 a
 

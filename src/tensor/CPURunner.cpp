@@ -208,9 +208,10 @@ ShapedTensorResult runShapedTensorCPU(
   auto context = makeCPUContext();
   mlir::OwningOpRef<mlir::ModuleOp> module =
       mlir::ModuleOp::create(mlir::UnknownLoc::get(context.get()));
-  translateShapedTensorExpression(*module, expression, specs);
-  ShapedTensorResult result{{}, arguments.front().shape};
-  const auto count = arguments.front().values.size();
+  auto shape = translateShapedTensorExpression(*module, expression, specs);
+  const auto count =
+      static_cast<size_t>(shape.size() == 1 ? shape[0] : shape[0] * shape[1]);
+  ShapedTensorResult result{{}, std::move(shape)};
   if (!count)
     return result;
   result.values.resize(count);

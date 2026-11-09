@@ -2,11 +2,13 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/IR/Verifier.h"
 #include "src/tensor/CPURunner.h"
 #include "src/tensor/TensorFrontend.h"
 #include "test/runner/TestSpec.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <algorithm>
 #include <array>
 #include <limits>
 #include <stdexcept>
@@ -47,7 +49,8 @@ std::string print(mlir::ModuleOp module) {
 
 int main(int argc, char **argv) {
   try {
-    require(argc == 2, "usage: shaped_cpu_contracts <same_shape.ml>");
+    require(argc == 4, "usage: shaped_cpu_contracts <same_shape.ml> "
+                       "<broadcast-semantics.ml> <broadcast-empty.ml>");
     auto test = sconeml::test::readCase(argv[1], "rank2-three");
     auto args = arguments(test);
     std::string beforeIR, changedIR;
@@ -116,16 +119,57 @@ int main(int argc, char **argv) {
         {{"a", args[0].values}, {"b", args[0].values.first(1)}}};
     rejects("matching lengths", [&] { runTensorCPU("a + b", flat); });
 
+    // A smaller first argument must not determine output size/rank. The
+    // broadcast result remains owned after borrowed spans and shapes disappear.
+    ShapedTensorResult broadcastEscaped;
+    {
+      auto local = sconeml::test::readCase(argv[2], "argument-order-5");
+      auto localArgs = arguments(local);
+      broadcastEscaped = runShapedTensorCPU(local.program, localArgs);
+      require(broadcastEscaped.values == expected(local) &&
+                  broadcastEscaped.shape == std::vector<int64_t>({2, 3}),
+              "mixed-rank ABI/output inference failed");
+    }
+    require(broadcastEscaped.values.size() == 6 &&
+                broadcastEscaped.values.back() == 374,
+            "broadcast output did not survive input/JIT destruction");
+    const auto overlapping =
+        sconeml::test::readCase(argv[2], "overlapping-broadcast");
+    auto broadcastArgs = arguments(overlapping);
+    std::vector<int32_t> shared{1, 2, 3, 4, 5, 6};
+    broadcastArgs[0].values = shared;
+    broadcastArgs[1].values = std::span<const int32_t>(shared).subspan(1, 3);
+    require(runShapedTensorCPU(overlapping.program, broadcastArgs).values ==
+                    expected(overlapping) &&
+                shared == std::vector<int32_t>({1, 2, 3, 4, 5, 6}),
+            "broadcast over overlapping host spans failed or modified input");
+    for (const auto &emptyCase : sconeml::test::readCases(argv[3])) {
+      auto emptyArgs = arguments(emptyCase);
+      dump = "stale";
+      const auto result =
+          runShapedTensorCPU(emptyCase.program, emptyArgs, &dump);
+      for (const auto &assertion : emptyCase.assertions.at("cpu"))
+        if (assertion.kind == "shape")
+          require(result.shape == sconeml::test::parseShape(assertion.value),
+                  "empty broadcast shape differs");
+      require(result.values.empty() && dump.empty(),
+              "broadcast with nonempty inputs/empty output must skip JIT");
+    }
+
     mlir::MLIRContext context;
     context.getOrLoadDialect<mlir::arith::ArithDialect>();
     context.getOrLoadDialect<mlir::func::FuncDialect>();
     context.getOrLoadDialect<mlir::memref::MemRefDialect>();
     context.getOrLoadDialect<mlir::linalg::LinalgDialect>();
-    auto build = [&] {
+    auto build = [&](bool broadcast = false) {
       mlir::OwningOpRef<mlir::ModuleOp> module =
           mlir::ModuleOp::create(mlir::UnknownLoc::get(&context));
       std::array<ShapedTensorArgumentSpec, 2> specs{
           {{"a", 6, {2, 3}}, {"b", 6, {2, 3}}}};
+      if (broadcast) {
+        specs[0] = {"a", 2, {2, 1}};
+        specs[1] = {"b", 3, {1, 3}};
+      }
       translateShapedTensorExpression(*module, "a + b", specs);
       return module;
     };
@@ -133,8 +177,8 @@ int main(int argc, char **argv) {
     const auto originalIR = print(*baseline);
     validateShapedTensorExpression(*baseline);
     require(print(*baseline) == originalIR, "validation mutated module");
-    auto corrupt = [&](auto mutation) {
-      auto module = build();
+    auto corrupt = [&](auto mutation, bool broadcast = false) {
+      auto module = build(broadcast);
       auto function = *module->getOps<mlir::func::FuncOp>().begin();
       auto map = *function.getOps<mlir::linalg::GenericOp>().begin();
       mutation(function, map);
@@ -181,6 +225,67 @@ int main(int argc, char **argv) {
           builder, map.getLoc(), body.getArgument(0), body.getArgument(1));
       body.front().getNextNode()->setOperand(0, div);
     });
+    // Reject both an MLIR-valid map that selects the wrong row and an invalid
+    // loop index for a singleton axis. The latter could read outside its
+    // buffer.
+    corrupt(
+        [&](auto, auto map) {
+          auto maps = map.getIndexingMapsArray();
+          maps[0] =
+              mlir::AffineMap::get(2, 0,
+                                   {mlir::getAffineConstantExpr(1, &context),
+                                    mlir::getAffineConstantExpr(0, &context)},
+                                   &context);
+          mlir::OpBuilder builder(&context);
+          map.setIndexingMapsAttr(builder.getAffineMapArrayAttr(maps));
+          require(mlir::succeeded(mlir::verify(map)),
+                  "wrong-row mutation must be valid generic Linalg");
+        },
+        true);
+    corrupt(
+        [&](auto, auto map) {
+          auto maps = map.getIndexingMapsArray();
+          maps[0] = mlir::AffineMap::getMultiDimIdentityMap(2, &context);
+          mlir::OpBuilder builder(&context);
+          map.setIndexingMapsAttr(builder.getAffineMapArrayAttr(maps));
+        },
+        true);
+    corrupt(
+        [&](auto, auto map) {
+          auto &body = map.getRegion().front();
+          body.front().setOperand(0, body.getArguments().back());
+        },
+        true);
+    // A valid view with an output shape larger than inferred must fail even if
+    // every input map is an otherwise valid projection into that loop space.
+    {
+      mlir::OwningOpRef<mlir::ModuleOp> module =
+          mlir::ModuleOp::create(mlir::UnknownLoc::get(&context));
+      std::array<ShapedTensorArgumentSpec, 2> specs{
+          {{"a", 1, {1}}, {"b", 3, {3}}}};
+      translateShapedTensorExpression(*module, "a + b", specs);
+      auto function = *module->getOps<mlir::func::FuncOp>().begin();
+      // Rebind the singleton view to a size-1 ABI operand and change b's
+      // declared shape to singleton too, preserving valid generic structure.
+      auto view = *std::next(
+          function.getOps<mlir::memref::ReinterpretCastOp>().begin());
+      auto type =
+          mlir::MemRefType::get({1}, mlir::IntegerType::get(&context, 32),
+                                mlir::StridedLayoutAttr::get(&context, 0, {1}));
+      view.getResult().setType(type);
+      mlir::OpBuilder builder(&context);
+      view.setStaticSizesAttr(builder.getDenseI64ArrayAttr({1}));
+      auto flatType = mlir::MemRefType::get({1}, builder.getI32Type());
+      function.getBody().front().getArgument(1).setType(flatType);
+      function.setFunctionType(builder.getFunctionType(
+          function.getBody().front().getArgumentTypes(), {}));
+      auto map = *function.getOps<mlir::linalg::GenericOp>().begin();
+      auto maps = map.getIndexingMapsArray();
+      maps[1] = maps[0];
+      map.setIndexingMapsAttr(builder.getAffineMapArrayAttr(maps));
+      rejects("output shape does not match",
+              [&] { validateShapedTensorExpression(*module); });
+    }
     // Exercise capacity/overflow through metadata, without forged
     // spans/allocations.
     std::array<ShapedTensorArgumentSpec, 1> huge{
@@ -190,6 +295,16 @@ int main(int argc, char **argv) {
     huge[0] = {"a", 0, {0, std::numeric_limits<int64_t>::max()}};
     rejects("host index/byte/capacity",
             [&] { translateShapedTensorExpression(*baseline, "a", huge); });
+    const auto edge = static_cast<int64_t>(std::min<uint64_t>(
+        std::vector<int32_t>().max_size(),
+        std::min<uint64_t>(std::numeric_limits<int64_t>::max(),
+                           std::numeric_limits<size_t>::max() /
+                               sizeof(int32_t))));
+    std::array<ShapedTensorArgumentSpec, 2> outerHuge{
+        {{"a", static_cast<size_t>(edge), {edge, 1}}, {"b", 2, {1, 2}}}};
+    rejects("host index/byte/capacity", [&] {
+      translateShapedTensorExpression(*baseline, "7", outerHuge);
+    });
     llvm::outs() << "PASS shaped CPU ABI, specialization, ownership, empty, "
                     "bounds and IR contracts\n";
     return 0;

@@ -149,6 +149,8 @@ executes the public `runShapedTensorCPU` API and supports `result`, `shape`,
 `compare` and LLVM `ir-check` assertions. Each argument requires `shape: [R, C]`
 or `shape: [N]` alongside its name and row-major values. Shape fields are forbidden
 on existing flat pipelines, so a misspelled pipeline cannot ignore shape metadata.
+Shaped CPU runs infer trailing-axis broadcasting across all declared inputs,
+including unused ones.
 `shape` assertions use signed 64-bit extents and require rank 1 or 2. Numeric
 comparisons also compare the presence and contents of output shapes. Semantic
 shape errors belong to the frontend and can be asserted with `error`; missing
@@ -178,8 +180,13 @@ a + 1
 `shaped_cpu_contracts` checks ownership, overlapping input spans, input-value
 independence of IR, shape specialization, empty execution, flat API compatibility
 and rejection of mutated in-memory Linalg/wrapper IR. The programs and numeric
-expectations come from `test/shaped_input/same_shape.ml`. See the
-[API contract](shaped-tensor-cpu.md) and [M3-A evidence](m3-a-acceptance.md).
+expectations come from `test/shaped_input/same_shape.ml` and the grouped
+broadcast fixtures. `broadcast_reference_fixtures` checks an independent Python
+nested-loop oracle with hand-computed anchors and verifies all generated
+broadcast fixtures without writing. Regenerate only those fixtures with
+`python3 test/reference/generate_broadcast.py`; use `--check` to verify. See the
+[API contract](shaped-tensor-cpu.md), [M3-A evidence](m3-a-acceptance.md) and
+[M3-B evidence](m3-b-acceptance.md).
 
 ## IR format
 

@@ -84,7 +84,7 @@ and `metal-compile` also allow checking export and compilation independently.
 The GPU runner currently accepts a top-level tensor literal expression with one
 tensor map; it extracts the literal values from the translated IR. Other
 platforms keep the CPU test active and use a GPU runtime stub until a CUDA,
-ROCm, or SPIR-V backend is added. Shaped rank-1/rank-2 execution is available on CPU through the
+ROCm, or SPIR-V backend is added. Shaped rank-1/rank-2 execution with trailing-axis broadcasting is available on CPU through the
 [shaped tensor API](docs/shaped-tensor-cpu.md). Shaped GPU execution and reductions
 remain future work.
 
