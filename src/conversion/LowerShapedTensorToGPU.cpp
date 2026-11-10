@@ -25,10 +25,14 @@ tensor::MetalKernelLayout validateShapedTensorGPU(mlir::ModuleOp module) {
     auto shape = mlir::cast<mlir::MemRefType>(input.getType()).getShape();
     shapes.emplace_back(shape.begin(), shape.end());
   }
-  if (!outputType.getElementType().isSignlessInteger(32))
-    throw std::invalid_argument("f32 GPU execution is not implemented yet");
   auto shape = outputType.getShape();
-  return makeBroadcastIndexPlan(shapes, {shape.begin(), shape.end()}).layout;
+  auto layout =
+      makeBroadcastIndexPlan(shapes, {shape.begin(), shape.end()}).layout;
+  if (outputType.getElementType().isF32()) {
+    layout.elementType = tensor::MetalElementType::F32;
+    layout.floatProfile = tensor::MetalFloatProfile::SignedFTZ;
+  }
+  return layout;
 }
 
 namespace {
@@ -48,8 +52,11 @@ lowerBroadcast(mlir::linalg::GenericOp generic,
   builder.setInsertionPointToStart(device.getBody());
   auto global = mlir::gpu::AddressSpaceAttr::get(
       context, mlir::gpu::AddressSpace::Global);
+  auto elementType =
+      mlir::cast<mlir::MemRefType>(generic.getOutputs().front().getType())
+          .getElementType();
   auto buffer =
-      mlir::MemRefType::get({mlir::ShapedType::kDynamic}, builder.getI32Type(),
+      mlir::MemRefType::get({mlir::ShapedType::kDynamic}, elementType,
                             mlir::MemRefLayoutAttrInterface{}, global);
   const auto k = shapes.size();
   llvm::SmallVector<mlir::Type> parameters(k + 1, buffer);
@@ -125,6 +132,13 @@ lowerBroadcast(mlir::linalg::GenericOp generic,
            builder.getNamedAttr(
                "output_count",
                builder.getI64IntegerAttr(plan.layout.outputElementCount))}));
+  if (elementType.isF32()) {
+    (*module)->setAttr("sconeml.element_type",
+                       mlir::TypeAttr::get(elementType));
+    (*module)->setAttr("sconeml.element_bytes", builder.getI64IntegerAttr(4));
+    (*module)->setAttr("sconeml.float_profile",
+                       builder.getStringAttr("f32-ftz"));
+  }
   if (mlir::failed(mlir::verify(*module)))
     return mlir::failure();
   return std::move(module);
@@ -153,7 +167,10 @@ lowerShapedTensorToGPU(mlir::ModuleOp module) {
     inputShapes.emplace_back(inputShape.begin(), inputShape.end());
     identical &= inputShape == shape;
   }
-  if (!identical)
+  if (!identical ||
+      mlir::cast<mlir::MemRefType>(generic.getOutputs().front().getType())
+          .getElementType()
+          .isF32())
     return lowerBroadcast(generic, inputShapes, outputShape,
                           makeBroadcastIndexPlan(inputShapes, outputShape));
   auto *context = module.getContext();

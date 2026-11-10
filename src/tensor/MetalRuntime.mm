@@ -26,12 +26,15 @@ std::string metalDeviceName() {
   }
 }
 
-void runShapedMetalKernel(const std::string &source, const std::string &entrypoint,
-                    const MetalKernelLayout &layout,
-                    std::span<const MetalInput> inputs, std::span<int32_t> output,
-                    std::size_t elementCount, MetalLaunchOptions options) {
+void detail::runShapedMetalBytes(const std::string &source,
+                                 const std::string &entrypoint,
+                                 const MetalKernelLayout &layout,
+                                 std::span<const MetalByteInput> inputs,
+                                 std::span<std::byte> output,
+                                 std::size_t elementCount,
+                                 MetalLaunchOptions options) {
   // Reject host-side errors before touching Metal, including in CPU-only runs.
-  validateShapedMetalInputs(layout, inputs, output, elementCount, options);
+  validateShapedMetalBytes(layout, inputs, output, elementCount, options);
   if (elementCount == 0)
     return;
   if (!output.data())
@@ -47,8 +50,19 @@ void runShapedMetalKernel(const std::string &source, const std::string &entrypoi
     NSError *error = nil;
     NSString *sourceString =
         [NSString stringWithUTF8String:source.c_str()];
+    MTLCompileOptions *compileOptions = nil;
+    if (layout.elementType == MetalElementType::F32) {
+      compileOptions = [MTLCompileOptions new];
+      if (@available(macOS 15.0, *)) {
+        compileOptions.mathMode = MTLMathModeSafe;
+        compileOptions.mathFloatingPointFunctions =
+            MTLMathFloatingPointFunctionsPrecise;
+      } else {
+        compileOptions.fastMathEnabled = NO;
+      }
+    }
     id<MTLLibrary> library = [device newLibraryWithSource:sourceString
-                                                  options:nil
+                                                  options:compileOptions
                                                     error:&error];
     if (library == nil)
       throw std::runtime_error(
@@ -71,9 +85,11 @@ void runShapedMetalKernel(const std::string &source, const std::string &entrypoi
         pipeline.maxTotalThreadsPerThreadgroup,
         device.maxThreadsPerThreadgroup.width);
     std::vector<size_t> lengths;
-    for (auto input : inputs) lengths.push_back(input.size());
-    const auto shaped = planShapedMetalLaunch(layout, lengths, output.size(),
-        elementCount, options, maxThreads, device.maxBufferLength);
+    for (auto input : inputs)
+      lengths.push_back(input.size() / layout.elementByteSize);
+    const auto shaped = planShapedMetalLaunch(
+        layout, lengths, output.size() / layout.elementByteSize, elementCount,
+        options, maxThreads, device.maxBufferLength);
     const auto &launch = shaped.output;
     const std::size_t byteCount = launch.byteCount;
     id<MTLBuffer> inputBuffers[3] = {nil, nil, nil};
