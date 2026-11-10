@@ -25,6 +25,8 @@ tensor::MetalKernelLayout validateShapedTensorGPU(mlir::ModuleOp module) {
     auto shape = mlir::cast<mlir::MemRefType>(input.getType()).getShape();
     shapes.emplace_back(shape.begin(), shape.end());
   }
+  if (!outputType.getElementType().isSignlessInteger(32))
+    throw std::invalid_argument("f32 GPU execution is not implemented yet");
   auto shape = outputType.getShape();
   return makeBroadcastIndexPlan(shapes, {shape.begin(), shape.end()}).layout;
 }

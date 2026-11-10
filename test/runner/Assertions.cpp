@@ -11,6 +11,20 @@
 
 namespace sconeml::test {
 static std::string numericDifference(const Number &expected, const Number &actual) {
+  if (expected.f32 != actual.f32)
+    return "; dtype differs";
+  if (expected.f32) {
+    if (expected.f32Bits.size() != actual.f32Bits.size())
+      return "; f32 element count differs";
+    for (size_t i = 0; i < expected.f32Bits.size(); ++i) {
+      Number a{true, {}, true, {expected.f32Bits[i]}},
+          b{true, {}, true, {actual.f32Bits[i]}};
+      if (!(a == b))
+        return "; first differing f32 element [" + std::to_string(i) +
+               "]: expected " + formatNumber(a) + ", actual " + formatNumber(b);
+    }
+    return "";
+  }
   if (expected.tensor != actual.tensor)
     return "; scalar/tensor kind differs";
   if (expected.values.size() != actual.values.size())
@@ -92,7 +106,8 @@ void checkAssertions(const TestCase &test, const Run &run, const Output &output,
     if (assertion.kind == "success")
       continue;
     if (assertion.kind == "result") {
-      auto expected = parseNumber(assertion.value);
+      auto expected =
+          parseNumber(assertion.value, run.pipeline.starts_with("shaped-f32-"));
       require(output.number && *output.number == expected,
               "expected " + formatNumber(expected) + ", actual " +
                   (output.number ? formatNumber(*output.number)

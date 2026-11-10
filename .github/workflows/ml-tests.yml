@@ -33,7 +33,7 @@ jobs:
             -DCMAKE_PREFIX_PATH="$(brew --prefix zstd)"
 
       - name: Build unified test runner and interface tests
-        run: cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts gpu_input_contracts gpu_input_stub_contracts grouped_spec_checks shaped_cpu_contracts shaped_gpu_contracts shaped_gpu_stub_contracts --parallel 3
+        run: cmake --build build --target tester tensor_interfaces metal_runtime_checks metal_stub_checks cpu_input_contracts gpu_input_contracts gpu_input_stub_contracts grouped_spec_checks shaped_cpu_contracts shaped_gpu_contracts shaped_gpu_stub_contracts f32_cpu_contracts --parallel 3
 
       - name: Run compiler data suite and runner contracts
         run: ctest --test-dir build --output-on-failure

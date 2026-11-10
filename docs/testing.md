@@ -458,3 +458,15 @@ stub checks nonempty rejection and empty success without claiming GPU execution.
 Runner contracts deliberately corrupt a generated result and require failure,
 check comparison dependencies and strict device policy, and require frontend
 errors to pass without device skips. See [M2 acceptance](m2-acceptance.md).
+
+## Typed f32 CPU fixtures
+
+`shaped-f32-cpu` and `shaped-f32-ir` require `profile: f32-ftz`, and every
+argument explicitly declares `dtype: f32`. Result arrays use exact binary32 bits
+except NaN classification; zero and infinity signs remain significant. Decimal
+and raw-bit data, schema restrictions and the numerical contract are documented
+in [f32 execution](f32-execution.md). `test/f32_cpu/` contains 28 source runs;
+`f32_cpu_contracts` covers ABI/ownership, malformed normalization/profile IR,
+rounding environment and schema assertions. The independent native CPU/Metal
+probe is `test/reference/probe_f32.mm`; [M4-A evidence](m4-a-acceptance.md)
+records the decision gate and commands.

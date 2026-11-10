@@ -35,6 +35,10 @@ struct ShapedTensorArgumentSpec {
 std::vector<int64_t> translateShapedTensorExpression(
     mlir::ModuleOp module, const std::string &expression,
     std::span<const ShapedTensorArgumentSpec> arguments);
+// Homogeneous f32 with explicit signed flush-to-zero at every scalar boundary.
+std::vector<int64_t> translateShapedTensorF32Expression(
+    mlir::ModuleOp module, const std::string &expression,
+    std::span<const ShapedTensorArgumentSpec> arguments);
 // Narrow production envelope validation, also used before CPU lowering.
 // Arbitrary Linalg, captures, output reads and noncanonical views are rejected.
 void validateShapedTensorExpression(mlir::ModuleOp module);

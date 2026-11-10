@@ -1,7 +1,7 @@
 #include "test/runner/Pipelines.h"
 #include "src/conversion/ClosureConversion.h"
-#include "src/conversion/LowerTensorToGPU.h"
 #include "src/conversion/LowerShapedTensorToGPU.h"
+#include "src/conversion/LowerTensorToGPU.h"
 #include "src/conversion/LowerTensorToSCF.h"
 #include "src/conversion/LowerToLLVM.h"
 #include "src/conversion/MetalExporter.h"
@@ -10,6 +10,8 @@
 #include "src/tensor/CPURunner.h"
 #include "src/tensor/GPURunner.h"
 #include "src/tensor/TensorFrontend.h"
+#include <bit>
+#include <cstring>
 
 #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
 #include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
@@ -84,6 +86,43 @@ Output execute(const TestCase &test, const Run &run, bool disableMetal) {
         return mlir::success();
       });
   try {
+    if (run.pipeline.starts_with("shaped-f32-")) {
+      output.stage = "frontend";
+      std::vector<std::vector<float>> storage;
+      std::vector<sconeml::tensor::ShapedTensorF32Argument> arguments;
+      std::vector<sconeml::tensor::ShapedTensorArgumentSpec> specs;
+      for (const auto &argument : *run.arguments)
+        storage.push_back(f32Values(argument));
+      for (size_t i = 0; i < storage.size(); ++i) {
+        const auto &a = run.arguments->at(i);
+        arguments.push_back({a.name, storage[i], *a.shape});
+        specs.push_back({a.name, storage[i].size(), *a.shape});
+      }
+      const auto before = storage;
+      mlir::OwningOpRef<mlir::ModuleOp> module =
+          mlir::ModuleOp::create(mlir::UnknownLoc::get(context.get()));
+      sconeml::tensor::translateShapedTensorF32Expression(*module, test.program,
+                                                          specs);
+      if (run.pipeline == "shaped-f32-ir")
+        output.ir = print(*module);
+      else {
+        output.stage = "cpu-execute";
+        auto result = sconeml::tensor::runShapedTensorF32CPU(
+            test.program, arguments, &output.ir);
+        Number number;
+        number.tensor = number.f32 = true;
+        for (float value : result.values)
+          number.f32Bits.push_back(std::bit_cast<uint32_t>(value));
+        output.number = std::move(number);
+        output.shape = std::move(result.shape);
+        for (size_t i = 0; i < storage.size(); ++i)
+          require(std::memcmp(before[i].data(), storage[i].data(),
+                              storage[i].size() * sizeof(float)) == 0,
+                  "f32 execution modified input");
+      }
+      output.success = true;
+      return output;
+    }
     if (run.pipeline.starts_with("shaped-input-")) {
       output.stage = "frontend";
       std::vector<sconeml::tensor::ShapedTensorArgumentSpec> specs;

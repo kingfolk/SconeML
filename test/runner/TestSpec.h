@@ -13,12 +13,15 @@ struct InputArgument {
   std::string name;
   std::vector<int32_t> values;
   std::optional<std::vector<int64_t>> shape;
+  std::string dtype = "i32";
+  std::vector<std::string> f32Values;
 };
 struct Run {
   std::string name;
   std::string pipeline;
   std::optional<uint64_t> threadsPerThreadgroup = std::nullopt;
   std::optional<std::vector<InputArgument>> arguments = std::nullopt;
+  std::optional<std::string> profile = std::nullopt;
 };
 struct Assertion {
   std::string kind;
@@ -42,7 +45,9 @@ struct ExpectedError {
 struct Number {
   bool tensor = false;
   std::vector<int32_t> values;
-  bool operator==(const Number &) const = default;
+  bool f32 = false;
+  std::vector<uint32_t> f32Bits;
+  bool operator==(const Number &) const;
 };
 std::vector<TestCase> readCases(const std::string &path);
 std::vector<TestCase> parseCases(const std::string &path,
@@ -53,7 +58,9 @@ TestCase parseCase(const std::string &path, const std::string &text,
                    const std::string &name = "");
 ExpectedError parseError(const std::string &text);
 std::vector<int64_t> parseShape(const std::string &text);
-Number parseNumber(const std::string &text);
+Number parseNumber(const std::string &text, bool f32 = false);
+uint32_t parseF32Bits(const std::string &text);
+std::vector<float> f32Values(const InputArgument &argument);
 std::string formatNumber(const Number &number);
 bool knownPipeline(const std::string &name);
 std::string trim(const std::string &text);

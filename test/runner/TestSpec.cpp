@@ -5,8 +5,12 @@
 #include "llvm/Support/YAMLTraits.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "llvm/ADT/APFloat.h"
+#include "llvm/Support/Error.h"
 #include <algorithm>
+#include <bit>
 #include <charconv>
+#include <iomanip>
 #include <limits>
 #include <set>
 #include <sstream>
@@ -27,7 +31,13 @@ namespace llvm::yaml {
 template <> struct MappingTraits<sconeml::test::InputArgument> {
   static void mapping(IO &io, sconeml::test::InputArgument &argument) {
     io.mapRequired("name", argument.name);
-    io.mapRequired("values", argument.values);
+    io.mapOptional("dtype", argument.dtype);
+    if (argument.dtype != "i32" && argument.dtype != "f32")
+      io.setError("unsupported argument dtype");
+    if (argument.dtype == "f32")
+      io.mapRequired("values", argument.f32Values);
+    else
+      io.mapRequired("values", argument.values);
     io.mapOptional("shape", argument.shape);
   }
 };
@@ -37,6 +47,7 @@ template <> struct MappingTraits<sconeml::test::Run> {
     io.mapRequired("pipeline", run.pipeline);
     io.mapOptional("threads-per-group", run.threadsPerThreadgroup);
     io.mapOptional("arguments", run.arguments);
+    io.mapOptional("profile", run.profile);
   }
 };
 template <> struct MappingTraits<sconeml::test::Config> {
@@ -82,15 +93,31 @@ template <typename T> T yaml(const std::string &text) {
 }
 
 bool knownPipeline(const std::string &name) {
-  static const std::set<std::string> names{
-      "verify",           "letalg",          "letalg-opt",
-      "tensor-scf",       "tensor-effects",  "tensor-gpu-ir",
-      "tensor-msl",       "metal-compile",   "tensor-cpu",
-      "scalar-cpu",       "tensor-metal",    "legacy-letalg",
-      "legacy-cpu",       "tensor-cpu-ir",   "tensor-metal-ir",
-      "tensor-input-cpu", "tensor-input-ir", "tensor-input-metal",
-      "shaped-input-ir", "shaped-input-cpu", "shaped-input-metal",
-      "shaped-input-gpu-ir", "shaped-input-msl"};
+  static const std::set<std::string> names{"verify",
+                                           "letalg",
+                                           "letalg-opt",
+                                           "tensor-scf",
+                                           "tensor-effects",
+                                           "tensor-gpu-ir",
+                                           "tensor-msl",
+                                           "metal-compile",
+                                           "tensor-cpu",
+                                           "scalar-cpu",
+                                           "tensor-metal",
+                                           "legacy-letalg",
+                                           "legacy-cpu",
+                                           "tensor-cpu-ir",
+                                           "tensor-metal-ir",
+                                           "tensor-input-cpu",
+                                           "tensor-input-ir",
+                                           "tensor-input-metal",
+                                           "shaped-input-ir",
+                                           "shaped-input-cpu",
+                                           "shaped-input-metal",
+                                           "shaped-input-gpu-ir",
+                                           "shaped-input-msl",
+                                           "shaped-f32-cpu",
+                                           "shaped-f32-ir"};
   return names.contains(name);
 }
 
@@ -99,12 +126,22 @@ static bool numericPipeline(const std::string &pipeline) {
          pipeline == "legacy-cpu" || pipeline == "tensor-metal" ||
          pipeline == "tensor-cpu-ir" || pipeline == "tensor-metal-ir" ||
          pipeline == "tensor-input-cpu" || pipeline == "tensor-input-metal" ||
-         pipeline == "shaped-input-cpu" || pipeline == "shaped-input-metal";
+         pipeline == "shaped-input-cpu" || pipeline == "shaped-input-metal" ||
+         pipeline == "shaped-f32-cpu";
 }
 
 static bool supports(const std::string &pipeline, const std::string &kind) {
+  if (pipeline.starts_with("shaped-f32-")) {
+    if (kind == "success" || kind == "error")
+      return true;
+    if (kind == "ir-check" || kind == "ir-equal")
+      return true;
+    return pipeline == "shaped-f32-cpu" &&
+           (kind == "result" || kind == "shape" || kind == "compare");
+  }
   if (kind == "shape")
-    return pipeline == "shaped-input-cpu" || pipeline == "shaped-input-metal";
+    return pipeline == "shaped-input-cpu" || pipeline == "shaped-input-metal" ||
+           pipeline == "shaped-f32-cpu";
   if ((kind == "ir-check" || kind == "ir-equal") &&
       (pipeline == "shaped-input-ir" || pipeline == "shaped-input-cpu" ||
        pipeline == "shaped-input-gpu-ir" || pipeline == "shaped-input-msl"))
@@ -159,7 +196,63 @@ ExpectedError parseError(const std::string &text) {
   return error;
 }
 
-Number parseNumber(const std::string &text) {
+uint32_t parseF32Bits(const std::string &text) {
+  auto spelling = trim(text);
+  if (spelling.starts_with("0x")) {
+    uint32_t bits;
+    auto [end, error] = std::from_chars(
+        spelling.data() + 2, spelling.data() + spelling.size(), bits, 16);
+    require(error == std::errc{} && end == spelling.data() + spelling.size(),
+            "invalid f32 bit pattern");
+    return bits;
+  }
+  if (spelling == "inf" || spelling == "+inf")
+    return 0x7f800000u;
+  if (spelling == "-inf")
+    return 0xff800000u;
+  if (spelling == "nan")
+    return 0x7fc00000u;
+  llvm::APFloat value(llvm::APFloat::IEEEsingle());
+  auto status =
+      value.convertFromString(spelling, llvm::APFloat::rmNearestTiesToEven);
+  if (!status) {
+    llvm::consumeError(status.takeError());
+    throw std::runtime_error("invalid f32 data value");
+  }
+  require(value.isFinite(), "f32 data overflow; use explicit inf or raw bits");
+  return static_cast<uint32_t>(value.bitcastToAPInt().getZExtValue());
+}
+std::vector<float> f32Values(const InputArgument &argument) {
+  std::vector<float> result;
+  for (const auto &text : argument.f32Values)
+    result.push_back(std::bit_cast<float>(parseF32Bits(text)));
+  return result;
+}
+bool Number::operator==(const Number &other) const {
+  if (tensor != other.tensor || f32 != other.f32)
+    return false;
+  if (!f32)
+    return values == other.values;
+  if (f32Bits.size() != other.f32Bits.size())
+    return false;
+  auto nan = [](uint32_t b) { return (b & 0x7fffffffu) > 0x7f800000u; };
+  for (size_t i = 0; i < f32Bits.size(); ++i)
+    if (f32Bits[i] != other.f32Bits[i] &&
+        !(nan(f32Bits[i]) && nan(other.f32Bits[i])))
+      return false;
+  return true;
+}
+
+Number parseNumber(const std::string &text, bool f32) {
+  if (f32) {
+    Number number;
+    number.tensor = true;
+    number.f32 = true;
+    require(trim(text).starts_with("["), "f32 result requires an array");
+    for (const auto &element : yaml<std::vector<std::string>>(text))
+      number.f32Bits.push_back(parseF32Bits(element));
+    return number;
+  }
   auto value = trim(text);
   require(!value.empty(), "empty numeric result");
   Number number;
@@ -185,6 +278,17 @@ Number parseNumber(const std::string &text) {
 }
 
 std::string formatNumber(const Number &number) {
+  if (number.f32) {
+    std::ostringstream stream;
+    stream << "[";
+    for (size_t i = 0; i < number.f32Bits.size(); ++i) {
+      if (i)
+        stream << ", ";
+      stream << "0x" << std::hex << std::setw(8) << std::setfill('0')
+             << number.f32Bits[i];
+    }
+    return stream.str() + "]";
+  }
   std::string text = number.tensor ? "[" : "";
   for (size_t i = 0; i < number.values.size(); ++i) {
     if (i)
@@ -350,7 +454,12 @@ static TestCase parseSingleCase(const std::string &path,
     require(!run.name.empty() && names.insert(run.name).second,
             "empty or duplicate run name: " + run.name);
     require(knownPipeline(run.pipeline), "unknown pipeline: " + run.pipeline);
-    const bool shaped = run.pipeline.starts_with("shaped-input-");
+    const bool floatRun = run.pipeline.starts_with("shaped-f32-");
+    const bool shaped = run.pipeline.starts_with("shaped-input-") || floatRun;
+    require(floatRun ? (run.profile && *run.profile == "f32-ftz")
+                     : !run.profile,
+            "f32 runs require explicit f32-ftz profile; profile forbidden on "
+            "i32 runs");
     const bool sourceInputs = shaped || run.pipeline == "tensor-input-cpu" ||
                               run.pipeline == "tensor-input-ir" ||
                               run.pipeline == "tensor-input-metal";
@@ -360,9 +469,14 @@ static TestCase parseSingleCase(const std::string &path,
     require(!run.arguments || sourceInputs,
             "arguments is only supported by external-input pipelines");
     if (run.arguments)
-      for (const auto &argument : *run.arguments)
+      for (const auto &argument : *run.arguments) {
         require(argument.shape.has_value() == shaped,
                 "shape is required for shaped pipelines and forbidden for flat pipelines");
+        require(argument.dtype == (floatRun ? "f32" : "i32"),
+                "argument dtype does not match pipeline");
+        if (floatRun)
+          f32Values(argument);
+      }
     const bool mapIR =
         run.pipeline == "tensor-cpu-ir" || run.pipeline == "tensor-metal-ir";
     if (mapIR) {
@@ -408,18 +522,22 @@ static TestCase parseSingleCase(const std::string &path,
       }
       hasValues |= assertion.kind == "result" || assertion.kind == "compare";
       if (assertion.kind == "result")
-        parseNumber(assertion.value);
+        parseNumber(assertion.value, floatRun);
       if (assertion.kind == "compare")
-        require(preceding.contains(assertion.value) &&
-                    numericPipeline(preceding.at(assertion.value)),
-                "compare must reference an earlier run: " + assertion.value);
+        require(
+            preceding.contains(assertion.value) &&
+                numericPipeline(preceding.at(assertion.value)) &&
+                floatRun ==
+                    preceding.at(assertion.value).starts_with("shaped-f32-"),
+            "compare must reference an earlier run: " + assertion.value);
       if (assertion.kind == "success" || assertion.kind == "source-unchanged")
         require(assertion.value == "true", assertion.kind + " must be true");
     }
     require(!error || found->second.size() == 1,
             "error cannot be combined with success assertions");
     const bool shapedExecution = run.pipeline == "shaped-input-cpu" ||
-                                 run.pipeline == "shaped-input-metal";
+                                 run.pipeline == "shaped-input-metal" ||
+                                 run.pipeline == "shaped-f32-cpu";
     require(error || !shapedExecution || (hasShape && hasValues),
             "shaped execution requires shape and result or compare assertions: " + run.name);
     preceding.emplace(run.name, run.pipeline);
