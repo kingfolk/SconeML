@@ -387,7 +387,7 @@ static TestCase parseSingleCase(const std::string &path,
     auto found = test.assertions.find(run.name);
     require(found != test.assertions.end() && !found->second.empty(),
             "run has no assertions: " + run.name);
-    bool error = false;
+    bool error = false, hasShape = false, hasValues = false;
     for (const auto &assertion : found->second) {
       static const std::set<std::string> kinds{
           "result",   "compare",          "error",      "success",
@@ -402,8 +402,11 @@ static TestCase parseSingleCase(const std::string &path,
         parseError(assertion.value);
         error = true;
       }
-      if (assertion.kind == "shape")
+      if (assertion.kind == "shape") {
         parseShape(assertion.value);
+        hasShape = true;
+      }
+      hasValues |= assertion.kind == "result" || assertion.kind == "compare";
       if (assertion.kind == "result")
         parseNumber(assertion.value);
       if (assertion.kind == "compare")
@@ -415,6 +418,10 @@ static TestCase parseSingleCase(const std::string &path,
     }
     require(!error || found->second.size() == 1,
             "error cannot be combined with success assertions");
+    const bool shapedExecution = run.pipeline == "shaped-input-cpu" ||
+                                 run.pipeline == "shaped-input-metal";
+    require(error || !shapedExecution || (hasShape && hasValues),
+            "shaped execution requires shape and result or compare assertions: " + run.name);
     preceding.emplace(run.name, run.pipeline);
   }
   require(!test.tensorInput || consumesInput,

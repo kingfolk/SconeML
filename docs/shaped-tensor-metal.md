@@ -123,3 +123,7 @@ See [M3-C evidence](m3-c-acceptance.md) and [M3-D evidence](m3-d-acceptance.md).
 
 Rank >2, arbitrary strides/views, floats, reductions, caches and persistent
 execution sessions remain outside this feature. Full M3 acceptance is separate.
+
+The complete milestone gate is documented in [M3 acceptance](m3-acceptance.md),
+including the seeded matrix, mandatory shape/value test assertions, complete
+MSL expectations and retained malformed-IR/runtime/ownership contracts.

@@ -1,0 +1,31 @@
+#include <metal_stdlib>
+using namespace metal;
+
+kernel void tensor_map(device const uint *input0 [[buffer(0)]],
+                       device const uint *input1 [[buffer(1)]],
+                       device const uint *input2 [[buffer(2)]],
+                       device uint *output [[buffer(3)]],
+                       constant uint &count [[buffer(4)]],
+                       uint3 group_id [[threadgroup_position_in_grid]],
+                       uint3 group_size [[threads_per_threadgroup]],
+                       uint3 local_id [[thread_position_in_threadgroup]]) {
+  const uint v0 = group_id.x;
+  const uint v1 = group_size.x;
+  const uint v2 = local_id.x;
+  const uint v3 = v0 * v1;
+  const uint v4 = v3 + v2;
+  const uint v5 = count;
+  const bool v6 = v4 < v5;
+  if (v6) {
+    const uint v7 = input0[v4];
+    const uint v8 = 3u;
+    const uint v9 = v4 % v8;
+    const uint v10 = input1[v9];
+    const uint v11 = 3u;
+    const uint v12 = v4 / v11;
+    const uint v13 = input2[v12];
+    const uint v14 = v7 + v10;
+    const uint v15 = v14 + v13;
+    output[v4] = v15;
+  }
+}

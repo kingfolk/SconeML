@@ -12,6 +12,9 @@ Paths below are relative to `test/`.
 
 | File | Purpose | Cases |
 | --- | --- | ---: |
+| [acceptance_m3/semantics.ml](../test/acceptance_m3/semantics.ml) | Seeded shape/value acceptance, constants/unused/reordered inputs and complete MSL expectations | 9 |
+| [acceptance_m3/grid-boundaries.ml](../test/acceptance_m3/grid-boundaries.ml) | Exact flattened 1/W-1/W/W+1/2W+3 counts at widths 4/32/256 | 15 |
+| [acceptance_m3/empty.ml](../test/acceptance_m3/empty.ml) | Rank-1/rank-2 zero rules, unused empty inputs and constant fills | 6 |
 | [broadcast_gpu/semantics.ml](../test/broadcast_gpu/semantics.ml) | Independent GPU broadcast results, binding permutations, singleton identity and index IR/MSL | 21 |
 | [broadcast_gpu/empty.ml](../test/broadcast_gpu/empty.ml) | Broadcast 0/1 rules, nonempty inputs with empty output and constant expressions | 8 |
 | [broadcast_gpu/launch-boundaries.ml](../test/broadcast_gpu/launch-boundaries.ml) | Signed nonsquare broadcasts across widths 1/4/32 | 15 |
