@@ -340,3 +340,6 @@ add_test(NAME f32_gpu_contracts COMMAND f32_gpu_contracts
   ${CMAKE_CURRENT_SOURCE_DIR}/test/f32_gpu/semantics.ml)
 add_test(NAME f32_gpu_stub_contracts COMMAND f32_gpu_stub_contracts
   ${CMAKE_CURRENT_SOURCE_DIR}/test/f32_gpu/semantics.ml)
+
+add_test(NAME f32_acceptance_reference_fixtures COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate_m4.py --check)

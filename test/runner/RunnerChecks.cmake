@@ -469,3 +469,56 @@ expect_success(m3-empty-no-device "12 passed, 0 skipped, 0 failed" --no-metal --
 expect_failure(m3-strict-device "required device unavailable" --no-metal --require-metal
   --file "${DATA_ROOT}/acceptance_m3/semantics.ml" --case row-column-golden --run metal)
 message(STATUS "Shaped value/shape completeness, filtering, stage and M3 device-policy contracts passed")
+
+# M4 numerical/profile/device policy must fail visibly on a wrong expectation.
+read_source_case("${DATA_ROOT}/acceptance_m4/arithmetic.ml" "round-even" float_case)
+string(REPLACE "(* @assert:cpu:result\n[0x3f800000, 0x3f800002]"
+  "(* @assert:cpu:result\n[0x3f800001, 0x3f800002]" changed "${float_case}")
+file(WRITE "${SCRATCH}/wrong-f32-result.ml" "${changed}")
+expect_failure(wrong-f32-result "first differing f32 element [0]"
+  --file "${SCRATCH}/wrong-f32-result.ml" --run cpu)
+string(REPLACE "    profile: f32-ftz\n" "" changed "${float_case}")
+file(WRITE "${SCRATCH}/missing-f32-profile.ml" "${changed}")
+expect_config_failure(missing-f32-profile "explicit f32-ftz profile"
+  --file "${SCRATCH}/missing-f32-profile.ml" --run cpu)
+string(REPLACE "profile: f32-ftz" "profile: ieee" changed "${float_case}")
+file(WRITE "${SCRATCH}/unknown-f32-profile.ml" "${changed}")
+expect_config_failure(unknown-f32-profile "explicit f32-ftz profile"
+  --file "${SCRATCH}/unknown-f32-profile.ml" --run cpu)
+string(REPLACE "dtype: f32" "dtype: i32" changed "${float_case}")
+file(WRITE "${SCRATCH}/wrong-f32-dtype.ml" "${changed}")
+expect_config_failure(wrong-f32-dtype "dtype does not match pipeline"
+  --file "${SCRATCH}/wrong-f32-dtype.ml" --run cpu)
+string(REPLACE "(* @assert:metal:shape\n[2]\n*)\n" "" changed "${float_case}")
+file(WRITE "${SCRATCH}/missing-f32-shape.ml" "${changed}")
+# Validation includes filtered-out device runs, so a filter cannot hide errors.
+expect_config_failure(missing-f32-shape "shaped execution requires shape"
+  --file "${SCRATCH}/missing-f32-shape.ml" --run cpu --no-metal)
+string(REPLACE "(* @assert:cpu:result\n[0x3f800000, 0x3f800002]\n*)\n" "" changed "${float_case}")
+file(WRITE "${SCRATCH}/missing-f32-values.ml" "${changed}")
+expect_config_failure(missing-f32-values "result or compare assertions"
+  --file "${SCRATCH}/missing-f32-values.ml" --run cpu)
+read_source_case("${DATA_ROOT}/acceptance_m4/arithmetic.ml" "identity-bits" float_identity)
+string(REPLACE "(* @assert:cpu:result\n[0x00000000, 0x80000000"
+  "(* @assert:cpu:result\n[0x80000000, 0x80000000" changed "${float_identity}")
+file(WRITE "${SCRATCH}/wrong-f32-zero-sign.ml" "${changed}")
+expect_failure(wrong-f32-zero-sign "first differing f32 element [0]"
+  --file "${SCRATCH}/wrong-f32-zero-sign.ml" --run cpu)
+string(REPLACE "(* @assert:metal:compare\ncpu\n*)" "(* @assert:metal:compare\nabsent\n*)" changed "${float_case}")
+file(WRITE "${SCRATCH}/wrong-f32-compare.ml" "${changed}")
+expect_config_failure(wrong-f32-compare "compare must reference an earlier run"
+  --file "${SCRATCH}/wrong-f32-compare.ml" --run cpu --no-metal)
+expect_failure(f32-strict-device "required device unavailable" --no-metal --require-metal
+  --file "${DATA_ROOT}/acceptance_m4/arithmetic.ml" --case round-even --run metal)
+expect_success(f32-empty-no-device "12 passed, 0 skipped, 0 failed" --no-metal --require-metal
+  --file "${DATA_ROOT}/acceptance_m4/empty.ml")
+expect_success(f32-errors-before-device "12 passed, 0 skipped, 0 failed" --no-metal --require-metal
+  --file "${DATA_ROOT}/f32_gpu/invalid.ml")
+
+# A golden changed by one byte must fail even when device execution is disabled.
+read_source_case("${DATA_ROOT}/acceptance_m4/structure.ml" "f32-add-golden" float_golden)
+string(REPLACE "const float v18 = v16 + v17;" "const float v18 = v16 - v17;" changed "${float_golden}")
+file(WRITE "${SCRATCH}/wrong-f32-golden.ml" "${changed}")
+expect_failure(wrong-f32-golden "actual:" --no-metal
+  --file "${SCRATCH}/wrong-f32-golden.ml" --run device)
+message(STATUS "f32 exact/zero-sign/profile/dtype/completeness/golden/device contracts passed")

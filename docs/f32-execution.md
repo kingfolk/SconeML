@@ -100,3 +100,13 @@ The unified runner also supports `shaped-f32-metal`, `shaped-f32-gpu-ir` and
 whether a nonempty device run must skip; `--require-metal` rejects those skips.
 `--no-metal` still executes empty outputs and checks all frontend/launch errors.
 Structural adapters verify IR/MSL and source preservation without a device.
+
+## Complete numerical acceptance
+
+[M4 acceptance](m4-acceptance.md) records the independent rational binary32
+oracle, 62 cases / 125 runs, the complete hand-authored shader, mutation tests,
+real-device settings/results and supported limits. The oracle uses exact
+integers/Fraction arithmetic with per-operation rounding and pre-rounding
+tininess, rather than host double arithmetic. Regenerate only with
+`python3 test/reference/generate_m4.py`; `--check` verifies fixtures read-only.
+No numeric tolerance is configurable in this profile.

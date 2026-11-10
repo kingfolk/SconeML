@@ -241,11 +241,13 @@ func.func @test_function() {
 }
 ```
 
-### Typed f32 execution (M4-A/B)
+### Typed f32 execution (M4)
 
 Dense rank-1/rank-2 f32 expressions and broadcasting are available through
 `runShapedTensorF32CPU` and `runShapedTensorF32GPU`, with explicit float spans, owned results and the
 `f32-ftz` numerical profile. See [usage and numerical contract](docs/f32-execution.md)
 and [CPU validation evidence](docs/m4-a-acceptance.md) /
-[Metal validation evidence](docs/m4-b-acceptance.md). Independent full numerical
-acceptance follows in the dependent M4-C change.
+[Metal validation evidence](docs/m4-b-acceptance.md).
+[Full M4 acceptance](docs/m4-acceptance.md) records the independent rational
+binary32 oracle and real-device results: CTest 22/22 and strict Metal 1040/1040,
+with zero skips.

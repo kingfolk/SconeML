@@ -481,3 +481,24 @@ in `test/f32_gpu/` cover actual arithmetic and structural/error contracts;
 `f32_gpu_contracts` / `f32_gpu_stub_contracts` add typed runtime metadata,
 corruption, ownership and unavailable/empty behavior. The stub target builds on
 macOS as well. See [M4-B evidence](m4-b-acceptance.md).
+
+## Complete M4 numerical acceptance
+
+`test/acceptance_m4/` contains 62 self-contained cases / 125 runs across exact
+arithmetic, exceptional-value cross products, broadcasting, dispatch boundaries,
+empty outputs, seeded wide magnitudes and a complete hand-authored f32 shader.
+`f32_acceptance_reference_fixtures` checks the independent integer/Fraction
+binary32 oracle's anchors, exact contents and file set read-only. Every numeric
+run checks independent expectations and shape; Metal also compares with CPU.
+
+```sh
+python3 test/reference/generate_m4.py --check
+python3 -O test/reference/generate_m4.py --check
+./build/tester --suite test/acceptance_m4 --require-metal
+./build/tester --suite test/acceptance_m4 --no-metal
+```
+
+Runner contracts mutate exact results, zero signs, profile/dtype, missing
+shape/values, comparisons and the shader golden, and verify strict/empty/error
+device policy. See [M4 acceptance](m4-acceptance.md) for the oracle design,
+coverage/evidence map, numerical contract and final results.

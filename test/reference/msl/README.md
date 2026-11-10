@@ -9,3 +9,9 @@ zero index. They are not captured or refreshed from compiler output.
 Python nested-loop oracle. When changing export intentionally, review the whole
 shader contract and edit the golden explicitly, then regenerate source fixtures.
 The read-only fixture check never writes a golden or runs the compiler.
+
+
+`f32-add.msl` is a complete hand-authored M4 shader for `a + 0.5`. It checks
+all float/integer bindings, SSA numbering, input/output signed-FTZ sequences,
+constant bits and the bounds guard. `generate_m4.py` embeds it in a standalone
+source fixture; it must never be refreshed from actual compiler output.
