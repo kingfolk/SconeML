@@ -124,7 +124,11 @@ bool knownPipeline(const std::string &name) {
                                            "sum-i32-cpu",
                                            "sum-f32-cpu",
                                            "sum-i32-ir",
-                                           "sum-f32-ir"};
+                                           "sum-f32-ir",
+                                           "sum-i32-metal",
+                                           "sum-f32-metal",
+                                           "sum-i32-msl",
+                                           "sum-f32-msl"};
   return names.contains(name);
 }
 
@@ -147,6 +151,10 @@ static bool supports(const std::string &pipeline, const std::string &kind) {
       return numericPipeline(pipeline);
     if (kind == "ir-check" || kind == "ir-equal")
       return pipeline.ends_with("-ir") || pipeline.ends_with("-cpu");
+    if (kind == "text-check" || kind == "text-equal")
+      return pipeline.ends_with("-msl") || pipeline.ends_with("-metal");
+    if (kind == "entrypoint")
+      return pipeline.ends_with("-msl");
     return false;
   }
   if (pipeline.starts_with("shaped-f32-")) {
@@ -518,7 +526,8 @@ static TestCase parseSingleCase(const std::string &path,
                 run.pipeline == "tensor-metal-ir" ||
                 run.pipeline == "tensor-input-metal" ||
                 (run.pipeline == "shaped-input-metal" ||
-                 run.pipeline == "shaped-f32-metal"),
+                 run.pipeline == "shaped-f32-metal" ||
+                 (sumRun && run.pipeline.ends_with("-metal"))),
             "threads-per-group is only supported by tensor-metal pipelines");
     require(!run.threadsPerThreadgroup || *run.threadsPerThreadgroup > 0,
             "threads-per-group must be positive");

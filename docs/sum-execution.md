@@ -83,3 +83,33 @@ requires both expected values and shape; only sum accepts shape `[]`.
 including exact integer wrapping and rational binary32 addition/tree anchors.
 
 The IR follows the [MLIR Linalg iterator and identity model](https://mlir.llvm.org/docs/Dialects/Linalg/).
+
+## Metal reduction (M5-B)
+
+`runSumI32GPU` / `runSumF32GPU` in `src/tensor/SumGPU.h` execute the same
+source and fixed tree. Explicit width is either default/zero or 256; other
+widths are rejected even for empty execution. The checked `SumMetalProgram`
+owns plan, dtype, byte size, profile, source and dispatch dependencies. Validation
+reconstructs the canonical program and rejects altered source/metadata, buffer
+length/type errors and byte limits before device work.
+
+Each threadgroup loads up to 256 items into shared scratch, initializes inactive
+lanes with zero, and adds adjacent pairs at strides 1,2,4,...128. Every lane
+participates in each barrier. One partial is written per group. Subsequent
+passes use a contiguous partial matrix and repeat until one result per output
+remains. Axis=0 initially uses strided column loads; axis=1 uses contiguous rows.
+
+The runtime uses separate ordinary serial compute encoders in one command
+buffer and tracked shared buffers, preserving producer/consumer dependencies.
+A precise-lifetime owner retains all partial buffers until completion; no
+threadgroup barrier is treated as a cross-group barrier. Host/device byte limits,
+256-lane and static scratch limits, pipeline/command errors are checked.
+Explicit GPU execution has no CPU fallback. Empty-output and empty-reduction
+identities succeed without compiling/accessing a device, with an empty dump.
+
+`sum-i32-metal` / `sum-f32-metal` expose production execution;
+`sum-i32-msl` / `sum-f32-msl` expose canonical source without a device.
+Source/schema/axis/launch validation precedes device skips in the test adapter.
+The [Metal compute encoder model](https://developer.apple.com/library/archive/documentation/Miscellaneous/Conceptual/MetalProgrammingGuide/Compute-Ctx/Compute-Ctx.html)
+provides the serial encoding and threadgroup execution basis; ordinary tracked
+resources are used, not untracked heaps or concurrent encoders.
