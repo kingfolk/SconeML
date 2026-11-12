@@ -106,15 +106,18 @@ void checkAssertions(const TestCase &test, const Run &run, const Output &output,
     if (assertion.kind == "success")
       continue;
     if (assertion.kind == "result") {
-      auto expected =
-          parseNumber(assertion.value, run.pipeline.starts_with("shaped-f32-"));
+      auto expected = parseNumber(assertion.value,
+                                  (run.pipeline.starts_with("shaped-f32-") ||
+                                   run.pipeline.starts_with("sum-f32-")));
       require(output.number && *output.number == expected,
               "expected " + formatNumber(expected) + ", actual " +
                   (output.number ? formatNumber(*output.number)
                                  : "no numeric result") +
                   (output.number ? numericDifference(expected, *output.number) : ""));
     } else if (assertion.kind == "shape") {
-      require(output.shape && *output.shape == parseShape(assertion.value),
+      require(output.shape &&
+                  *output.shape == parseShape(assertion.value,
+                                              run.pipeline.starts_with("sum-")),
               "result shape differs from expected " + assertion.value);
     } else if (assertion.kind == "compare") {
       const auto &other = previous.at(assertion.value);

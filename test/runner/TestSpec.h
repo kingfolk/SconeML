@@ -57,7 +57,7 @@ TestCase readCase(const std::string &path, const std::string &name = "");
 TestCase parseCase(const std::string &path, const std::string &text,
                    const std::string &name = "");
 ExpectedError parseError(const std::string &text);
-std::vector<int64_t> parseShape(const std::string &text);
+std::vector<int64_t> parseShape(const std::string &text, bool scalar = false);
 Number parseNumber(const std::string &text, bool f32 = false);
 uint32_t parseF32Bits(const std::string &text);
 std::vector<float> f32Values(const InputArgument &argument);

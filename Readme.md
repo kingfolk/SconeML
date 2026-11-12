@@ -251,3 +251,11 @@ and [CPU validation evidence](docs/m4-a-acceptance.md) /
 [Full M4 acceptance](docs/m4-acceptance.md) records the independent rational
 binary32 oracle and real-device results: CTest 22/22 and strict Metal 1040/1040,
 with zero skips.
+
+### Sum reductions (M5-A)
+
+`runSumI32CPU` / `runSumF32CPU` execute global or single-axis sums with owned
+rank-0/rank-1 results, defined empty identities and fixed-tree numerical order.
+See [sum usage and numerical policy](docs/sum-execution.md) and
+[CPU evidence](docs/m5-a-acceptance.md). Metal execution and map composition
+follow in the dependent M5 stack layers.

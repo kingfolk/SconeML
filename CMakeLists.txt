@@ -343,3 +343,17 @@ add_test(NAME f32_gpu_stub_contracts COMMAND f32_gpu_stub_contracts
 
 add_test(NAME f32_acceptance_reference_fixtures COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate_m4.py --check)
+
+add_library(SconeMLSumCPU STATIC src/tensor/SumFrontend.cpp src/tensor/SumCPU.cpp)
+target_compile_options(SconeMLSumCPU PRIVATE -fexceptions)
+target_link_libraries(SconeMLSumCPU PUBLIC MLIR MLIRExecutionEngine)
+target_sources(tester PRIVATE test/runner/SumExecution.cpp)
+target_link_libraries(tester PRIVATE SconeMLSumCPU)
+add_llvm_executable(sum_cpu_contracts test/runner/SumCPUContracts.cpp
+  src/tensor/TensorFrontend.cpp src/dialect/LetAlgDialect.cpp)
+add_dependencies(sum_cpu_contracts LetAlgDialectIncGen)
+target_compile_options(sum_cpu_contracts PRIVATE -fexceptions)
+target_link_libraries(sum_cpu_contracts PRIVATE SconeMLSumCPU SconeMLTestSpec MLIR MLIRExecutionEngine)
+add_test(NAME sum_cpu_contracts COMMAND sum_cpu_contracts ${CMAKE_CURRENT_SOURCE_DIR}/test/sum_cpu/semantics.ml)
+add_test(NAME sum_reference_fixtures COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/reference/generate_sum.py --check)
