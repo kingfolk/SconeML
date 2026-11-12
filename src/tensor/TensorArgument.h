@@ -24,6 +24,16 @@ struct ShapedTensorResult {
   std::vector<int32_t> values;
   std::vector<int64_t> shape;
 };
+// Explicitly typed f32 boundaries; no overload ambiguity for legacy {} calls.
+struct ShapedTensorF32Argument {
+  std::string name;
+  std::span<const float> values;
+  std::vector<int64_t> shape;
+};
+struct ShapedTensorF32Result {
+  std::vector<float> values;
+  std::vector<int64_t> shape;
+};
 } // namespace sconeml::tensor
 
 #endif

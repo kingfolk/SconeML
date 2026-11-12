@@ -304,3 +304,14 @@ add_test(NAME runner_contracts COMMAND ${CMAKE_COMMAND}
   -DDATA_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/test
   -DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/runner-contracts
   -P ${CMAKE_CURRENT_SOURCE_DIR}/test/runner/RunnerChecks.cmake)
+
+add_llvm_executable(f32_cpu_contracts
+  test/runner/F32CPUContracts.cpp
+  src/tensor/CPURunner.cpp
+  src/tensor/TensorFrontend.cpp
+  src/dialect/LetAlgDialect.cpp)
+target_compile_options(f32_cpu_contracts PRIVATE -fexceptions)
+add_dependencies(f32_cpu_contracts LetAlgDialectIncGen)
+target_link_libraries(f32_cpu_contracts PRIVATE SconeMLTestSpec MLIR MLIRExecutionEngine)
+add_test(NAME f32_cpu_contracts COMMAND f32_cpu_contracts
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/f32_cpu/semantics.ml)

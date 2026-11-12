@@ -30,8 +30,9 @@
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include <cstdlib>
 #include <array>
+#include <cfenv>
+#include <cstdlib>
 #include <memory>
 #include <stdexcept>
 
@@ -113,14 +114,15 @@ std::unique_ptr<mlir::ExecutionEngine> compileCPU(mlir::ModuleOp module,
   return std::move(*engine);
 }
 
-void invokeFlatBuffers(void *function, std::span<const TensorArgument> arguments,
-                       std::vector<int32_t> &output) {
+template <typename T, typename Argument>
+void invokeFlatBuffers(void *function, std::span<const Argument> arguments,
+                       std::vector<T> &output) {
   // MLIR's descriptor ABI uses mutable pointers even for read-only inputs.
   // The verified map reads input and writes only the independent output.
-  using Descriptor = StridedMemRefType<int32_t, 1>;
+  using Descriptor = StridedMemRefType<T, 1>;
   std::array<Descriptor, 3> inputs;
   for (size_t i = 0; i < arguments.size(); ++i) {
-    auto *data = const_cast<int32_t *>(arguments[i].values.data());
+    auto *data = const_cast<T *>(arguments[i].values.data());
     inputs[i] = {data, data, 0, {static_cast<int64_t>(arguments[i].values.size())}, {1}};
   }
   Descriptor out{output.data(), output.data(), 0,
@@ -222,7 +224,42 @@ ShapedTensorResult runShapedTensorCPU(
   std::vector<TensorArgument> flat;
   for (const auto &argument : arguments)
     flat.push_back({argument.name, argument.values});
-  invokeFlatBuffers(*function, flat, result.values);
+  invokeFlatBuffers(*function, std::span<const TensorArgument>(flat),
+                    result.values);
+  return result;
+}
+
+ShapedTensorF32Result
+runShapedTensorF32CPU(const std::string &expression,
+                      std::span<const ShapedTensorF32Argument> arguments,
+                      std::string *loweredLLVMIR) {
+  if (loweredLLVMIR)
+    loweredLLVMIR->clear();
+  if (std::fegetround() != FE_TONEAREST)
+    throw std::invalid_argument(
+        "f32-ftz requires round-to-nearest host environment");
+  std::vector<ShapedTensorArgumentSpec> specs;
+  for (const auto &argument : arguments) {
+    if (!argument.values.empty() && !argument.values.data())
+      throw std::invalid_argument(
+          "f32 nonempty input requires nonnull storage");
+    specs.push_back({argument.name, argument.values.size(), argument.shape});
+  }
+  auto context = makeCPUContext();
+  mlir::OwningOpRef<mlir::ModuleOp> module =
+      mlir::ModuleOp::create(mlir::UnknownLoc::get(context.get()));
+  auto shape = translateShapedTensorF32Expression(*module, expression, specs);
+  auto count =
+      static_cast<size_t>(shape.size() == 1 ? shape[0] : shape[0] * shape[1]);
+  ShapedTensorF32Result result{{}, std::move(shape)};
+  if (!count)
+    return result;
+  result.values.resize(count);
+  auto engine = compileCPU(*module, loweredLLVMIR, true);
+  auto function = engine->lookup("_mlir_ciface_shaped_tensor_expression");
+  if (!function)
+    throwLLVMError(function.takeError(), "f32 CPU JIT lookup failed");
+  invokeFlatBuffers(*function, arguments, result.values);
   return result;
 }
 

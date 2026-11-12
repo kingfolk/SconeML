@@ -11,6 +11,7 @@ class ExprNode {
 public:
   enum ExprNodeKind {
     Kind_Num,
+    Kind_Float,
     Kind_TensorLiteral,
     Kind_Var,
     Kind_BinOp,
@@ -63,6 +64,16 @@ public:
   std::string dump() override {
     return std::to_string(val);
   }
+};
+
+// Preserve decimal spelling until direct binary32 conversion (no double round).
+class FloatExprNode : public ExprNode {
+  std::string spelling;
+
+public:
+  explicit FloatExprNode(std::string value)
+      : ExprNode(Kind_Float), spelling(std::move(value)) {}
+  std::string dump() override { return spelling; }
 };
 
 class VarExprNode : public ExprNode {

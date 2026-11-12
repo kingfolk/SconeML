@@ -1,4 +1,5 @@
 #include "src/tensor/TensorFrontend.h"
+#include "src/tensor/F32Support.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -157,9 +158,37 @@ void shapedRequire(bool valid, const char *message) {
 }
 } // namespace
 
-std::vector<int64_t> translateShapedTensorExpression(
-    mlir::ModuleOp module, const std::string &source,
-    std::span<const ShapedTensorArgumentSpec> arguments) {
+namespace {
+mlir::Value translateF32Element(
+    mlir::OpBuilder &builder, ExprNode *expression,
+    const std::unordered_map<std::string, mlir::Value> &bindings) {
+  auto loc = builder.getUnknownLoc();
+  if (expression->getKind() == ExprNode::Kind_Var)
+    return bindings.at(static_cast<VarExprNode *>(expression)->getName());
+  if (expression->getKind() == ExprNode::Kind_Float)
+    return mlir::arith::ConstantOp::create(
+        builder, loc,
+        builder.getFloatAttr(builder.getF32Type(),
+                             parseF32Literal(expression->dump())));
+  auto *binary = static_cast<BinopExprNode *>(expression);
+  auto left = translateF32Element(builder, binary->getL(), bindings);
+  auto right = translateF32Element(builder, binary->getR(), bindings);
+  mlir::Value value;
+  if (binary->getOp() == '*')
+    value = mlir::arith::MulFOp::create(builder, loc, left, right);
+  else if (binary->getOp() == '-')
+    value = mlir::arith::SubFOp::create(builder, loc, left, right);
+  else
+    value = mlir::arith::AddFOp::create(builder, loc, left, right);
+  return binary->getOp() == '*'
+             ? flushF32Product(builder, loc, value, left, right)
+             : flushF32(builder, loc, value);
+}
+
+std::vector<int64_t>
+translateShaped(mlir::ModuleOp module, const std::string &source,
+                std::span<const ShapedTensorArgumentSpec> arguments, bool f32) {
+
   if (arguments.empty() || arguments.size() > 3)
     throw std::invalid_argument(
         "shaped expression requires between one and three tensor arguments");
@@ -180,22 +209,28 @@ std::vector<int64_t> translateShapedTensorExpression(
   for (const auto &argument : arguments)
     inputShapes.push_back(argument.shape);
   const auto shape = inferBroadcastShape(inputShapes);
-  auto expression = parseTensorExpression(source);
+  auto expression =
+      f32 ? parseF32TensorExpression(source) : parseTensorExpression(source);
   validateNames(expression.get(), names);
   module.getContext()->getOrLoadDialect<mlir::linalg::LinalgDialect>();
   mlir::OpBuilder builder(module.getContext());
   auto loc = builder.getUnknownLoc();
+  mlir::Type elementType =
+      f32 ? mlir::Type(builder.getF32Type()) : mlir::Type(builder.getI32Type());
   llvm::SmallVector<mlir::Type> flatTypes;
   llvm::SmallVector<llvm::ArrayRef<int64_t>> viewShapes(inputShapes);
   viewShapes.push_back(shape);
   for (auto viewShape : viewShapes)
     flatTypes.push_back(mlir::MemRefType::get(
-        {checkedDenseShape(viewShape).count}, builder.getI32Type()));
+        {checkedDenseShape(viewShape).count}, elementType));
   builder.setInsertionPointToStart(module.getBody());
   auto function =
       mlir::func::FuncOp::create(builder, loc, "shaped_tensor_expression",
                                  builder.getFunctionType(flatTypes, {}));
   function->setAttr("llvm.emit_c_interface", builder.getUnitAttr());
+  if (f32)
+    function->setAttr("sconeml.float_profile",
+                      builder.getStringAttr("f32-ftz"));
   auto *entry = function.addEntryBlock();
   builder.setInsertionPointToStart(entry);
   llvm::SmallVector<mlir::Value> views;
@@ -203,7 +238,7 @@ std::vector<int64_t> translateShapedTensorExpression(
        llvm::zip(entry->getArguments(), viewShapes)) {
     auto layout = checkedDenseShape(viewShape);
     auto viewType = mlir::MemRefType::get(
-        viewShape, builder.getI32Type(),
+        viewShape, elementType,
         mlir::StridedLayoutAttr::get(module.getContext(), 0, layout.strides));
     views.push_back(mlir::memref::ReinterpretCastOp::create(
         builder, loc, viewType, buffer, 0, viewShape, layout.strides));
@@ -221,15 +256,30 @@ std::vector<int64_t> translateShapedTensorExpression(
           mlir::ValueRange elements) {
         std::unordered_map<std::string, mlir::Value> bindings;
         for (size_t i = 0; i < arguments.size(); ++i)
-          bindings.emplace(arguments[i].name, elements[i]);
+          bindings.emplace(arguments[i].name,
+                           f32 ? flushF32(body, bodyLoc, elements[i])
+                               : elements[i]);
         sconeml::TranslateContext context{};
-        auto value = translateTensorElementExpr(body, expression.get(),
-                                                bindings, context);
+        auto value = f32 ? translateF32Element(body, expression.get(), bindings)
+                         : translateTensorElementExpr(body, expression.get(),
+                                                      bindings, context);
         mlir::linalg::YieldOp::create(body, bodyLoc, value);
       });
   mlir::func::ReturnOp::create(builder, loc);
   validateShapedTensorExpression(module);
   return shape;
+}
+
+} // namespace
+std::vector<int64_t> translateShapedTensorExpression(
+    mlir::ModuleOp module, const std::string &source,
+    std::span<const ShapedTensorArgumentSpec> arguments) {
+  return translateShaped(module, source, arguments, false);
+}
+std::vector<int64_t> translateShapedTensorF32Expression(
+    mlir::ModuleOp module, const std::string &source,
+    std::span<const ShapedTensorArgumentSpec> arguments) {
+  return translateShaped(module, source, arguments, true);
 }
 
 void validateShapedTensorExpression(mlir::ModuleOp module) {
@@ -248,6 +298,15 @@ void validateShapedTensorExpression(mlir::ModuleOp module) {
   auto &entry = function.getBody().front();
   auto arity = entry.getNumArguments();
   shapedRequire(arity >= 2 && arity <= 4, "expected 1-3 inputs and output");
+  auto firstBuffer = mlir::dyn_cast<mlir::MemRefType>(entry.getArgument(0).getType());
+  shapedRequire(static_cast<bool>(firstBuffer), "expected flat memref arguments");
+  auto elementType = firstBuffer.getElementType();
+  const bool f32 = elementType.isF32();
+  auto profile =
+      function->getAttrOfType<mlir::StringAttr>("sconeml.float_profile");
+  shapedRequire(f32 ? (profile && profile.getValue() == "f32-ftz")
+                    : !function->hasAttr("sconeml.float_profile"),
+                "unsupported floating-point profile");
   // Exactly one canonical view per ABI argument, one map and a return.
   shapedRequire(entry.getOperations().size() == arity + 2,
                 "unexpected wrapper operations");
@@ -261,9 +320,10 @@ void validateShapedTensorExpression(mlir::ModuleOp module) {
                   "view operand order");
     auto type = mlir::cast<mlir::MemRefType>(view.getType());
     shapedRequire(type.hasStaticShape() &&
-                      type.getElementType().isSignlessInteger(32) &&
+                      (type.getElementType().isSignlessInteger(32) || f32) &&
+                      type.getElementType() == elementType &&
                       !type.getMemorySpace(),
-                  "expected static host i32 views");
+                  "expected homogeneous static host i32/f32 views");
     auto layout = checkedDenseShape(type.getShape());
     auto expected = mlir::MemRefType::get(
         type.getShape(), type.getElementType(),
@@ -321,29 +381,38 @@ void validateShapedTensorExpression(mlir::ModuleOp module) {
   shapedRequire(body.getNumArguments() == arity,
                 "scalar argument count mismatch");
   for (auto argument : body.getArguments())
-    shapedRequire(argument.getType().isSignlessInteger(32),
-                  "expected i32 scalar arguments");
+    shapedRequire(argument.getType() == elementType,
+                  "expected matching scalar arguments");
   shapedRequire(body.getArguments().back().use_empty(),
                 "map must not read uninitialized output");
-  for (auto &scalar : body) {
-    for (auto operand : scalar.getOperands())
-      shapedRequire(operand.getParentBlock() == &body,
-                    "scalar captures are not supported");
-    if (mlir::isa<mlir::linalg::YieldOp>(scalar))
-      continue;
+  if (f32) {
+    auto yield = mlir::dyn_cast<mlir::linalg::YieldOp>(body.getTerminator());
     shapedRequire(
-        mlir::isMemoryEffectFree(&scalar) &&
-            mlir::isa<mlir::arith::ConstantOp, mlir::arith::AddIOp,
-                      mlir::arith::SubIOp, mlir::arith::MulIOp>(scalar) &&
-            scalar.getNumResults() == 1 &&
-            scalar.getResult(0).getType().isSignlessInteger(32),
-        "scalar body supports only i32 constants and add/sub/mul");
-    if (auto flags =
-            mlir::dyn_cast<mlir::arith::ArithIntegerOverflowFlagsInterface>(
-                &scalar))
-      shapedRequire(!flags.hasNoSignedWrap() && !flags.hasNoUnsignedWrap(),
-                    "scalar arithmetic must use wrapping i32 semantics");
-  }
+        yield && yield.getValues().size() == 1 &&
+            validateF32Scalars(body.begin(), std::prev(body.end()),
+                               body.getArguments().drop_back(),
+                               yield.getValues().front()),
+        "f32-ftz body requires normalized inputs/results and no fast-math");
+  } else
+    for (auto &scalar : body) {
+      for (auto operand : scalar.getOperands())
+        shapedRequire(operand.getParentBlock() == &body,
+                      "scalar captures are not supported");
+      if (mlir::isa<mlir::linalg::YieldOp>(scalar))
+        continue;
+      shapedRequire(
+          mlir::isMemoryEffectFree(&scalar) &&
+              mlir::isa<mlir::arith::ConstantOp, mlir::arith::AddIOp,
+                        mlir::arith::SubIOp, mlir::arith::MulIOp>(scalar) &&
+              scalar.getNumResults() == 1 &&
+              scalar.getResult(0).getType().isSignlessInteger(32),
+          "scalar body supports only i32 constants and add/sub/mul");
+      if (auto flags =
+              mlir::dyn_cast<mlir::arith::ArithIntegerOverflowFlagsInterface>(
+                  &scalar))
+        shapedRequire(!flags.hasNoSignedWrap() && !flags.hasNoUnsignedWrap(),
+                      "scalar arithmetic must use wrapping i32 semantics");
+    }
   shapedRequire(mlir::isa<mlir::func::ReturnOp>(&*op),
                 "expected wrapper return");
 }

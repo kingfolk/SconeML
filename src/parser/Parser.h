@@ -270,6 +270,94 @@ inline std::unique_ptr<ExprNode> parseTensorExpression(std::string_view source) 
     throw std::invalid_argument("tensor expression is empty or missing an operand");
   return parse(normalized);
 }
+// Same precedence and left associativity as the integer expression grammar.
+// Signed decimal/scientific literals are f32; calls, casts, parentheses and
+// unary variable operators remain outside this deliberately small language.
+inline std::unique_ptr<ExprNode>
+parseF32TensorExpression(std::string_view source) {
+  size_t position = 0;
+  auto space = [&] {
+    while (position < source.size() &&
+           std::isspace(static_cast<unsigned char>(source[position])))
+      ++position;
+  };
+  auto operand = [&]() -> std::unique_ptr<ExprNode> {
+    space();
+    auto start = position;
+    if (position == source.size())
+      throw std::invalid_argument(
+          "f32 expression is empty or missing an operand");
+    auto digit = [&](size_t i) {
+      return i < source.size() && source[i] >= '0' && source[i] <= '9';
+    };
+    char c = source[position];
+    if (digit(position) || c == '.' || c == '-' || c == '+') {
+      if (c == '-' || c == '+')
+        ++position;
+      bool digits = false;
+      while (digit(position)) {
+        digits = true;
+        ++position;
+      }
+      if (position < source.size() && source[position] == '.') {
+        ++position;
+        while (digit(position)) {
+          digits = true;
+          ++position;
+        }
+      }
+      if (!digits)
+        throw std::invalid_argument("invalid f32 literal");
+      if (position < source.size() &&
+          (source[position] == 'e' || source[position] == 'E')) {
+        ++position;
+        if (position < source.size() &&
+            (source[position] == '+' || source[position] == '-'))
+          ++position;
+        auto exponent = position;
+        while (digit(position))
+          ++position;
+        if (position == exponent)
+          throw std::invalid_argument("invalid f32 literal exponent");
+      }
+      return std::make_unique<FloatExprNode>(
+          std::string(source.substr(start, position - start)));
+    }
+    while (position < source.size() &&
+           (std::isalnum(static_cast<unsigned char>(source[position])) ||
+            source[position] == '_'))
+      ++position;
+    auto name = source.substr(start, position - start);
+    if (!isTensorExpressionIdentifier(name) || name == "nan" || name == "inf")
+      throw std::invalid_argument(
+          "f32 expression expected identifier or finite decimal literal");
+    return std::make_unique<VarExprNode>(std::string(name));
+  };
+  std::vector<std::unique_ptr<ExprNode>> terms;
+  std::vector<char> adds;
+  terms.push_back(operand());
+  while (true) {
+    space();
+    if (position == source.size())
+      break;
+    char op = source[position++];
+    if (op != '+' && op != '-' && op != '*')
+      throw std::invalid_argument("f32 expression expected +, - or *");
+    auto right = operand();
+    if (op == '*')
+      terms.back() = std::make_unique<BinopExprNode>(
+          op, std::move(terms.back()), std::move(right));
+    else {
+      adds.push_back(op);
+      terms.push_back(std::move(right));
+    }
+  }
+  auto result = std::move(terms.front());
+  for (size_t i = 0; i < adds.size(); ++i)
+    result = std::make_unique<BinopExprNode>(adds[i], std::move(result),
+                                             std::move(terms[i + 1]));
+  return result;
+}
 }
 
 #endif // SCONEML_PARSER_H

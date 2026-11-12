@@ -24,6 +24,13 @@ ShapedTensorResult runShapedTensorCPU(
     const std::string &expression, std::span<const ShapedTensorArgument> arguments,
     std::string *loweredLLVMIR = nullptr);
 
+// f32-ftz profile: RNE binary32 + / - / *, no contraction; signed FTZ on
+// inputs/constants and each arithmetic result. NaN payloads are unspecified.
+ShapedTensorF32Result
+runShapedTensorF32CPU(const std::string &expression,
+                      std::span<const ShapedTensorF32Argument> arguments,
+                      std::string *loweredLLVMIR = nullptr);
+
 } // namespace sconeml::tensor
 
 #endif
