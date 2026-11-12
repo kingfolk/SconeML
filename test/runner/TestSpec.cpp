@@ -496,8 +496,10 @@ static TestCase parseSingleCase(const std::string &path,
                 ? (run.profile &&
                    *run.profile == (sumRun ? "f32-sum-tree256-ftz" : "f32-ftz"))
                 : !run.profile,
-            "f32 runs require explicit f32-ftz profile; profile forbidden on "
-            "i32 runs");
+            sumRun ? "f32 sum runs require explicit f32-sum-tree256-ftz "
+                     "profile; profile forbidden on i32 runs"
+                   : "f32 runs require explicit f32-ftz profile; profile "
+                     "forbidden on i32 runs");
     const bool sourceInputs = shaped || run.pipeline == "tensor-input-cpu" ||
                               run.pipeline == "tensor-input-ir" ||
                               run.pipeline == "tensor-input-metal";
