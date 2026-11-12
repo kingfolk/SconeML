@@ -470,3 +470,14 @@ in [f32 execution](f32-execution.md). `test/f32_cpu/` contains 28 source runs;
 rounding environment and schema assertions. The independent native CPU/Metal
 probe is `test/reference/probe_f32.mm`; [M4-A evidence](m4-a-acceptance.md)
 records the decision gate and commands.
+
+
+## Typed f32 Metal fixtures
+
+`shaped-f32-metal` executes the typed production GPU API; `shaped-f32-gpu-ir`
+and `shaped-f32-msl` verify device extraction/export and preservation. They use
+the same explicit dtype/profile and exact result policy as f32 CPU. The 45 runs
+in `test/f32_gpu/` cover actual arithmetic and structural/error contracts;
+`f32_gpu_contracts` / `f32_gpu_stub_contracts` add typed runtime metadata,
+corruption, ownership and unavailable/empty behavior. The stub target builds on
+macOS as well. See [M4-B evidence](m4-b-acceptance.md).

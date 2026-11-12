@@ -117,7 +117,10 @@ bool knownPipeline(const std::string &name) {
                                            "shaped-input-gpu-ir",
                                            "shaped-input-msl",
                                            "shaped-f32-cpu",
-                                           "shaped-f32-ir"};
+                                           "shaped-f32-ir",
+                                           "shaped-f32-metal",
+                                           "shaped-f32-gpu-ir",
+                                           "shaped-f32-msl"};
   return names.contains(name);
 }
 
@@ -127,7 +130,7 @@ static bool numericPipeline(const std::string &pipeline) {
          pipeline == "tensor-cpu-ir" || pipeline == "tensor-metal-ir" ||
          pipeline == "tensor-input-cpu" || pipeline == "tensor-input-metal" ||
          pipeline == "shaped-input-cpu" || pipeline == "shaped-input-metal" ||
-         pipeline == "shaped-f32-cpu";
+         (pipeline == "shaped-f32-cpu" || pipeline == "shaped-f32-metal");
 }
 
 static bool supports(const std::string &pipeline, const std::string &kind) {
@@ -135,13 +138,19 @@ static bool supports(const std::string &pipeline, const std::string &kind) {
     if (kind == "success" || kind == "error")
       return true;
     if (kind == "ir-check" || kind == "ir-equal")
-      return true;
-    return pipeline == "shaped-f32-cpu" &&
+      return pipeline != "shaped-f32-metal";
+    if (kind == "text-check" || kind == "text-equal")
+      return pipeline == "shaped-f32-msl" || pipeline == "shaped-f32-metal";
+    if (kind == "source-unchanged")
+      return pipeline == "shaped-f32-gpu-ir" || pipeline == "shaped-f32-msl";
+    if (kind == "entrypoint")
+      return pipeline == "shaped-f32-msl";
+    return (pipeline == "shaped-f32-cpu" || pipeline == "shaped-f32-metal") &&
            (kind == "result" || kind == "shape" || kind == "compare");
   }
   if (kind == "shape")
     return pipeline == "shaped-input-cpu" || pipeline == "shaped-input-metal" ||
-           pipeline == "shaped-f32-cpu";
+           (pipeline == "shaped-f32-cpu" || pipeline == "shaped-f32-metal");
   if ((kind == "ir-check" || kind == "ir-equal") &&
       (pipeline == "shaped-input-ir" || pipeline == "shaped-input-cpu" ||
        pipeline == "shaped-input-gpu-ir" || pipeline == "shaped-input-msl"))
@@ -486,7 +495,9 @@ static TestCase parseSingleCase(const std::string &path,
     }
     require(!run.threadsPerThreadgroup || run.pipeline == "tensor-metal" ||
                 run.pipeline == "tensor-metal-ir" ||
-                run.pipeline == "tensor-input-metal" || run.pipeline == "shaped-input-metal",
+                run.pipeline == "tensor-input-metal" ||
+                (run.pipeline == "shaped-input-metal" ||
+                 run.pipeline == "shaped-f32-metal"),
             "threads-per-group is only supported by tensor-metal pipelines");
     require(!run.threadsPerThreadgroup || *run.threadsPerThreadgroup > 0,
             "threads-per-group must be positive");
@@ -537,7 +548,8 @@ static TestCase parseSingleCase(const std::string &path,
             "error cannot be combined with success assertions");
     const bool shapedExecution = run.pipeline == "shaped-input-cpu" ||
                                  run.pipeline == "shaped-input-metal" ||
-                                 run.pipeline == "shaped-f32-cpu";
+                                 (run.pipeline == "shaped-f32-cpu" ||
+                                  run.pipeline == "shaped-f32-metal");
     require(error || !shapedExecution || (hasShape && hasValues),
             "shaped execution requires shape and result or compare assertions: " + run.name);
     preceding.emplace(run.name, run.pipeline);

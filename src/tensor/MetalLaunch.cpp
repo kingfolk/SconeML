@@ -44,6 +44,17 @@ ShapedMetalLaunch planShapedMetalLaunch(const MetalKernelLayout &layout,
                                         MetalLaunchOptions options,
                                         size_t maxThreads,
                                         size_t maxBufferBytes) {
+  if (layout.elementByteSize != 4)
+    throw std::runtime_error(
+        "Metal element byte size does not match supported dtype");
+  if ((layout.elementType == MetalElementType::I32 &&
+       layout.floatProfile != MetalFloatProfile::None) ||
+      (layout.elementType == MetalElementType::F32 &&
+       layout.floatProfile != MetalFloatProfile::SignedFTZ) ||
+      (layout.elementType != MetalElementType::I32 &&
+       layout.elementType != MetalElementType::F32))
+    throw std::runtime_error(
+        "Metal unsupported element dtype/float profile metadata");
   if (layout.inputElementCounts.empty() ||
       layout.inputElementCounts.size() > 3 ||
       inputLengths.size() != layout.inputElementCounts.size())
@@ -76,6 +87,9 @@ ShapedMetalLaunch validateShapedMetalInputs(const MetalKernelLayout &layout,
                                             std::span<int32_t> output,
                                             size_t count,
                                             MetalLaunchOptions options) {
+  if (layout.elementType != MetalElementType::I32)
+    throw std::runtime_error(
+        "Metal integer buffers do not match element dtype metadata");
   std::vector<size_t> lengths;
   for (auto input : inputs)
     lengths.push_back(input.size());
@@ -88,6 +102,74 @@ ShapedMetalLaunch validateShapedMetalInputs(const MetalKernelLayout &layout,
   if (count && !output.data())
     throw std::runtime_error("Metal nonempty buffers require nonnull pointers");
   return launch;
+}
+
+ShapedMetalLaunch validateShapedMetalF32Inputs(
+    const MetalKernelLayout &layout, std::span<const MetalF32Input> inputs,
+    std::span<float> output, size_t count, MetalLaunchOptions options) {
+  if (layout.elementType != MetalElementType::F32)
+    throw std::runtime_error(
+        "Metal float buffers do not match element dtype metadata");
+  std::vector<size_t> lengths;
+  for (auto input : inputs)
+    lengths.push_back(input.size());
+  auto launch =
+      planShapedMetalLaunch(layout, lengths, output.size(), count, options);
+  for (auto input : inputs)
+    if (!input.empty() && !input.data())
+      throw std::runtime_error(
+          "Metal nonempty buffers require nonnull pointers");
+  if (count && !output.data())
+    throw std::runtime_error("Metal nonempty buffers require nonnull pointers");
+  return launch;
+}
+void runShapedMetalKernel(const std::string &source,
+                          const std::string &entrypoint,
+                          const MetalKernelLayout &layout,
+                          std::span<const MetalInput> inputs,
+                          std::span<int32_t> output, size_t count,
+                          MetalLaunchOptions options) {
+  validateShapedMetalInputs(layout, inputs, output, count, options);
+  std::vector<detail::MetalByteInput> bytes;
+  for (auto input : inputs)
+    bytes.push_back(std::as_bytes(input));
+  detail::runShapedMetalBytes(source, entrypoint, layout, bytes,
+                              std::as_writable_bytes(output), count, options);
+}
+void runShapedMetalKernelF32(const std::string &source,
+                             const std::string &entrypoint,
+                             const MetalKernelLayout &layout,
+                             std::span<const MetalF32Input> inputs,
+                             std::span<float> output, size_t count,
+                             MetalLaunchOptions options) {
+  validateShapedMetalF32Inputs(layout, inputs, output, count, options);
+  std::vector<detail::MetalByteInput> bytes;
+  for (auto input : inputs)
+    bytes.push_back(std::as_bytes(input));
+  detail::runShapedMetalBytes(source, entrypoint, layout, bytes,
+                              std::as_writable_bytes(output), count, options);
+}
+ShapedMetalLaunch detail::validateShapedMetalBytes(
+    const MetalKernelLayout &layout, std::span<const MetalByteInput> inputs,
+    std::span<std::byte> output, size_t count, MetalLaunchOptions options) {
+  if (layout.elementByteSize != 4)
+    throw std::runtime_error(
+        "Metal element byte size does not match supported dtype");
+  std::vector<size_t> lengths;
+  for (auto input : inputs) {
+    if (input.size() % layout.elementByteSize)
+      throw std::runtime_error("Metal input bytes do not match element size");
+    lengths.push_back(input.size() / layout.elementByteSize);
+    if (!input.empty() && !input.data())
+      throw std::runtime_error(
+          "Metal nonempty buffers require nonnull pointers");
+  }
+  if (output.size() % layout.elementByteSize)
+    throw std::runtime_error("Metal output bytes do not match element size");
+  if (count && !output.data())
+    throw std::runtime_error("Metal nonempty buffers require nonnull pointers");
+  return planShapedMetalLaunch(
+      layout, lengths, output.size() / layout.elementByteSize, count, options);
 }
 
 MetalLaunch planMetalLaunch(std::size_t count, std::size_t inputCapacity,

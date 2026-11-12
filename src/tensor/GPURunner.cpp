@@ -168,6 +168,49 @@ ShapedTensorResult runShapedTensorGPU(
   return result;
 }
 
+ShapedTensorF32Result
+runShapedTensorF32GPU(const std::string &expression,
+                      std::span<const ShapedTensorF32Argument> arguments,
+                      std::string *gpuSource, MetalLaunchOptions options) {
+  if (gpuSource)
+    gpuSource->clear();
+  std::vector<ShapedTensorArgumentSpec> specs;
+  std::vector<MetalF32Input> inputs;
+  for (const auto &argument : arguments) {
+    if (!argument.values.empty() && !argument.values.data())
+      throw std::invalid_argument(
+          "f32 nonempty input requires nonnull storage");
+    specs.push_back({argument.name, argument.values.size(), argument.shape});
+    inputs.push_back(argument.values);
+  }
+  auto context = makeGPUContext();
+  mlir::OwningOpRef<mlir::ModuleOp> module =
+      mlir::ModuleOp::create(mlir::UnknownLoc::get(context.get()));
+  auto shape = translateShapedTensorF32Expression(*module, expression, specs);
+  auto layout = sconeml::validateShapedTensorGPU(*module);
+  std::vector<size_t> lengths;
+  for (auto input : inputs)
+    lengths.push_back(input.size());
+  planShapedMetalLaunch(layout, lengths, layout.outputElementCount,
+                        layout.outputElementCount, options);
+  ShapedTensorF32Result result{{}, std::move(shape)};
+  if (!layout.outputElementCount)
+    return result;
+  auto device = sconeml::lowerShapedTensorToGPU(*module);
+  if (mlir::failed(device))
+    throw std::runtime_error("f32 GPU lowering failed");
+  auto kernel = sconeml::exportMetalKernel(**device);
+  if (mlir::failed(kernel) || !kernel->shapedLayout)
+    throw std::runtime_error("f32 Metal export failed");
+  if (gpuSource)
+    *gpuSource = kernel->source;
+  result.values.resize(layout.outputElementCount);
+  runShapedMetalKernelF32(kernel->source, kernel->entrypoint,
+                          *kernel->shapedLayout, inputs, result.values,
+                          layout.outputElementCount, options);
+  return result;
+}
+
 bool gpuIsAvailable() { return metalIsAvailable(); }
 std::string gpuName() { return metalDeviceName(); }
 } // namespace sconeml::tensor

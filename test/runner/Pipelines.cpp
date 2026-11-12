@@ -106,9 +106,55 @@ Output execute(const TestCase &test, const Run &run, bool disableMetal) {
       if (run.pipeline == "shaped-f32-ir")
         output.ir = print(*module);
       else {
-        output.stage = "cpu-execute";
-        auto result = sconeml::tensor::runShapedTensorF32CPU(
-            test.program, arguments, &output.ir);
+        sconeml::tensor::ShapedTensorF32Result result;
+        if (run.pipeline == "shaped-f32-cpu") {
+          output.stage = "cpu-execute";
+          result = sconeml::tensor::runShapedTensorF32CPU(
+              test.program, arguments, &output.ir);
+        } else {
+          output.stage = "gpu-lowering";
+          auto layout = sconeml::validateShapedTensorGPU(*module);
+          std::vector<size_t> lengths;
+          for (const auto &a : arguments)
+            lengths.push_back(a.values.size());
+          sconeml::tensor::planShapedMetalLaunch(
+              layout, lengths, layout.outputElementCount,
+              layout.outputElementCount,
+              {run.threadsPerThreadgroup.value_or(0)});
+          if (layout.outputElementCount || run.pipeline != "shaped-f32-metal") {
+            const auto before = print(*module);
+            auto device = sconeml::lowerShapedTensorToGPU(*module);
+            if (mlir::failed(device))
+              return output;
+            output.ir = print(**device);
+            output.sourceUnchanged = before == print(*module);
+            if (run.pipeline != "shaped-f32-gpu-ir") {
+              output.stage = "msl-export";
+              const auto beforeExport = print(**device);
+              auto kernel = sconeml::exportMetalKernel(**device);
+              if (mlir::failed(kernel))
+                return output;
+              output.text = kernel->source;
+              output.entrypoint = kernel->entrypoint;
+              output.sourceUnchanged =
+                  *output.sourceUnchanged && beforeExport == print(**device);
+            }
+          }
+          if (run.pipeline != "shaped-f32-metal") {
+            output.success = true;
+            return output;
+          }
+          output.stage = "metal-execute";
+          if (layout.outputElementCount &&
+              (disableMetal || !sconeml::tensor::gpuIsAvailable())) {
+            output.skipped = true;
+            output.diagnostic = "Metal device unavailable or disabled";
+            return output;
+          }
+          result = sconeml::tensor::runShapedTensorF32GPU(
+              test.program, arguments, &output.text,
+              {run.threadsPerThreadgroup.value_or(0)});
+        }
         Number number;
         number.tensor = number.f32 = true;
         for (float value : result.values)
@@ -116,8 +162,9 @@ Output execute(const TestCase &test, const Run &run, bool disableMetal) {
         output.number = std::move(number);
         output.shape = std::move(result.shape);
         for (size_t i = 0; i < storage.size(); ++i)
-          require(std::memcmp(before[i].data(), storage[i].data(),
-                              storage[i].size() * sizeof(float)) == 0,
+          require(storage[i].empty() ||
+                      std::memcmp(before[i].data(), storage[i].data(),
+                                  storage[i].size() * sizeof(float)) == 0,
                   "f32 execution modified input");
       }
       output.success = true;

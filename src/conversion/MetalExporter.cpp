@@ -1,5 +1,6 @@
 #include "src/conversion/MetalExporter.h"
 #include "src/conversion/ShapedGPUIndexing.h"
+#include "src/tensor/F32Support.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
@@ -23,7 +24,8 @@ void reject(mlir::Operation *op, llvm::StringRef reason) {
 bool isGlobalBuffer(mlir::Type type) {
   auto buffer = mlir::dyn_cast<mlir::MemRefType>(type);
   if (!buffer || buffer.getRank() != 1 || !buffer.isDynamicDim(0) ||
-      !buffer.getElementType().isSignlessInteger(32) ||
+      (!buffer.getElementType().isSignlessInteger(32) &&
+       !buffer.getElementType().isF32()) ||
       !buffer.getLayout().isIdentity())
     return false;
   auto space = mlir::dyn_cast_or_null<mlir::gpu::AddressSpaceAttr>(
@@ -38,7 +40,10 @@ bool supportedOperation(mlir::Operation *op) {
       mlir::gpu::ReturnOp, mlir::arith::ConstantOp, mlir::arith::AddIOp,
       mlir::arith::SubIOp, mlir::arith::MulIOp, mlir::arith::IndexCastUIOp,
       mlir::arith::CmpIOp, mlir::scf::IfOp, mlir::scf::YieldOp,
-      mlir::memref::LoadOp, mlir::memref::StoreOp>(op);
+      mlir::memref::LoadOp, mlir::memref::StoreOp, mlir::arith::AddFOp,
+      mlir::arith::SubFOp, mlir::arith::MulFOp, mlir::arith::BitcastOp,
+      mlir::arith::AndIOp, mlir::arith::OrIOp, mlir::arith::ShRUIOp,
+      mlir::arith::ExtUIOp, mlir::arith::SelectOp>(op);
 }
 
 mlir::FailureOr<std::optional<BroadcastIndexPlan>>
@@ -173,13 +178,38 @@ mlir::FailureOr<mlir::gpu::GPUFuncOp> validate(mlir::ModuleOp module) {
   if (signature) {
     signature = kernel.getBody().front().getNumArguments() == parameters &&
                 type.getInput(parameters - 1).isSignlessInteger(32);
-    for (unsigned i = 0; i + 1 < parameters; ++i)
+    for (unsigned i = 0; i + 1 < parameters; ++i) {
       signature &= isGlobalBuffer(type.getInput(i));
+      if (signature)
+        signature &=
+            mlir::cast<mlir::MemRefType>(type.getInput(i)).getElementType() ==
+            mlir::cast<mlir::MemRefType>(type.getInput(0)).getElementType();
+    }
   }
   if (!signature) {
     reject(kernel,
            "expected global identity-layout rank-1 dynamic i32 "
            "input/output and an i32 count, with no memory attributions");
+    return mlir::failure();
+  }
+  const auto elementType =
+      mlir::cast<mlir::MemRefType>(type.getInput(0)).getElementType();
+  const bool f32 = elementType.isF32();
+  auto profile =
+      module->getAttrOfType<mlir::StringAttr>("sconeml.float_profile");
+  auto element = module->getAttrOfType<mlir::TypeAttr>("sconeml.element_type");
+  auto bytes =
+      module->getAttrOfType<mlir::IntegerAttr>("sconeml.element_bytes");
+  if (f32 ? (!profile || profile.getValue() != "f32-ftz" || !element ||
+             element.getValue() != elementType || !bytes ||
+             !bytes.getType().isSignlessInteger(64) || bytes.getInt() != 4 ||
+             !module->hasAttr("sconeml.broadcast"))
+          : (module->hasAttr("sconeml.float_profile") ||
+             module->hasAttr("sconeml.element_type") ||
+             module->hasAttr("sconeml.element_bytes"))) {
+    reject(
+        module,
+        "invalid element dtype/byte size or floating-point profile metadata");
     return mlir::failure();
   }
   const unsigned inputCount = parameters - 2;
@@ -259,6 +289,7 @@ mlir::FailureOr<mlir::gpu::GPUFuncOp> validate(mlir::ModuleOp module) {
     return mlir::failure();
   }
   llvm::DenseSet<mlir::Value> scalars;
+  llvm::SmallVector<mlir::Value> loaded;
   auto scalarBegin = body.begin();
   int64_t columns = 1;
   if (broadcast) {
@@ -287,6 +318,16 @@ mlir::FailureOr<mlir::gpu::GPUFuncOp> validate(mlir::ModuleOp module) {
     }
     ++scalarBegin;
     scalars.insert(load.getResult());
+    loaded.push_back(load.getResult());
+  }
+  if (f32) {
+    if (!tensor::validateF32Scalars(scalarBegin, store->getIterator(), loaded,
+                                    store.getValue())) {
+      reject(guard, "f32-ftz scalar body requires canonical normalization and "
+                    "no fast-math");
+      return mlir::failure();
+    }
+    return kernel;
   }
   for (auto it = scalarBegin; &*it != store.getOperation(); ++it) {
     auto *op = &*it;
@@ -324,6 +365,15 @@ mlir::FailureOr<mlir::gpu::GPUFuncOp> validate(mlir::ModuleOp module) {
   return kernel;
 }
 
+const char *scalarName(mlir::Type type) {
+  if (type.isF32())
+    return "float";
+  if (type.isInteger(1))
+    return "bool";
+  if (type.isInteger(64))
+    return "ulong";
+  return "uint";
+}
 class Emitter {
 public:
   explicit Emitter(llvm::raw_ostream &stream) : stream(stream) {}
@@ -345,32 +395,52 @@ public:
         auto name = "v" + std::to_string(nextValue++);
         names[op.getResult(0)] = name;
         stream.indent(indent)
-            << "const "
-            << (op.getResult(0).getType().isInteger(1) ? "bool " : "uint ")
-            << name << " = ";
+            << "const " << scalarName(op.getResult(0).getType()) << " " << name
+            << " = ";
         if (mlir::isa<mlir::gpu::BlockIdOp>(op))
           stream << "group_id.x";
         else if (mlir::isa<mlir::gpu::BlockDimOp>(op))
           stream << "group_size.x";
         else if (mlir::isa<mlir::gpu::ThreadIdOp>(op))
           stream << "local_id.x";
-        else if (auto constant = mlir::dyn_cast<mlir::arith::ConstantOp>(op))
-          stream << mlir::cast<mlir::IntegerAttr>(constant.getValue())
-                        .getValue()
-                        .getZExtValue()
-                 << "u";
-        else if (auto load = mlir::dyn_cast<mlir::memref::LoadOp>(op))
+        else if (auto constant = mlir::dyn_cast<mlir::arith::ConstantOp>(op)) {
+          if (auto value = mlir::dyn_cast<mlir::FloatAttr>(constant.getValue()))
+            stream << "as_type<float>("
+                   << value.getValue().bitcastToAPInt().getZExtValue() << "u)";
+          else
+            stream << mlir::cast<mlir::IntegerAttr>(constant.getValue())
+                          .getValue()
+                          .getZExtValue()
+                   << (constant.getType().isInteger(64) ? "ul" : "u");
+        } else if (auto load = mlir::dyn_cast<mlir::memref::LoadOp>(op))
           stream << names.lookup(load.getMemref()) << "["
                  << names.lookup(load.getIndices()[0]) << "]";
         else if (mlir::isa<mlir::arith::IndexCastUIOp>(op))
           stream << names.lookup(op.getOperand(0));
+        else if (mlir::isa<mlir::arith::BitcastOp>(op))
+          stream << "as_type<" << scalarName(op.getResult(0).getType()) << ">("
+                 << names.lookup(op.getOperand(0)) << ")";
+        else if (mlir::isa<mlir::arith::ExtUIOp>(op))
+          stream << "ulong(" << names.lookup(op.getOperand(0)) << ")";
+        else if (auto select = mlir::dyn_cast<mlir::arith::SelectOp>(op))
+          stream << names.lookup(select.getCondition()) << " ? "
+                 << names.lookup(select.getTrueValue()) << " : "
+                 << names.lookup(select.getFalseValue());
         else {
-          const char *symbol = mlir::isa<mlir::arith::AddIOp>(op)   ? " + "
-                               : mlir::isa<mlir::arith::SubIOp>(op) ? " - "
-                               : mlir::isa<mlir::arith::MulIOp>(op) ? " * "
-                               : mlir::isa<mlir::arith::DivUIOp>(op) ? " / "
-                               : mlir::isa<mlir::arith::RemUIOp>(op) ? " % "
-                                                                    : " < ";
+          const char *symbol =
+              mlir::isa<mlir::arith::AddIOp, mlir::arith::AddFOp>(op)   ? " + "
+              : mlir::isa<mlir::arith::SubIOp, mlir::arith::SubFOp>(op) ? " - "
+              : mlir::isa<mlir::arith::MulIOp, mlir::arith::MulFOp>(op) ? " * "
+              : mlir::isa<mlir::arith::AndIOp>(op)                      ? " & "
+              : mlir::isa<mlir::arith::OrIOp>(op)                       ? " | "
+              : mlir::isa<mlir::arith::ShRUIOp>(op)                     ? " >> "
+              : (mlir::isa<mlir::arith::CmpIOp>(op) &&
+                 mlir::cast<mlir::arith::CmpIOp>(op).getPredicate() ==
+                     mlir::arith::CmpIPredicate::eq)
+                  ? " == "
+              : mlir::isa<mlir::arith::DivUIOp>(op) ? " / "
+              : mlir::isa<mlir::arith::RemUIOp>(op) ? " % "
+                                                    : " < ";
           stream << names.lookup(op.getOperand(0)) << symbol
                  << names.lookup(op.getOperand(1));
         }
@@ -454,17 +524,28 @@ mlir::FailureOr<MetalKernelSource> exportMetalKernel(mlir::ModuleOp module) {
   auto broadcast = readBroadcastPlan(module, *kernel, result.inputCount);
   if (mlir::failed(broadcast)) return mlir::failure();
   if (*broadcast) result.shapedLayout = (**broadcast).layout;
+  const bool f32 = mlir::cast<mlir::MemRefType>(entry.getArgument(0).getType())
+                       .getElementType()
+                       .isF32();
+  if (f32) {
+    result.shapedLayout->elementType = tensor::MetalElementType::F32;
+    result.shapedLayout->elementByteSize = 4;
+    result.shapedLayout->floatProfile = tensor::MetalFloatProfile::SignedFTZ;
+  }
   Emitter emitter(stream);
   stream << "#include <metal_stdlib>\nusing namespace metal;\n\n";
+  if (f32)
+    stream << "#pragma STDC FP_CONTRACT OFF\n\n";
   for (unsigned i = 0; i < result.inputCount; ++i) {
     auto name = result.inputCount == 1 ? std::string("input")
                                        : "input" + std::to_string(i);
     stream << (i == 0 ? "kernel void tensor_map(" : "                       ")
-           << "device const uint *" << name << " [[buffer(" << i << ")]],\n";
+           << "device const " << (f32 ? "float" : "uint") << " *" << name
+           << " [[buffer(" << i << ")]],\n";
     emitter.names[entry.getArgument(i)] = name;
   }
-  stream << "                       device uint *output [[buffer("
-         << result.inputCount << ")]],\n"
+  stream << "                       device " << (f32 ? "float" : "uint")
+         << " *output [[buffer(" << result.inputCount << ")]],\n"
          << "                       constant uint &count [[buffer("
          << result.inputCount + 1 << ")]],\n"
          << "                       uint3 group_id "

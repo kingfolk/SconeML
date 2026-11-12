@@ -24,6 +24,11 @@ std::vector<int32_t> runTensorGPU(
 ShapedTensorResult runShapedTensorGPU(
     const std::string &expression, std::span<const ShapedTensorArgument> arguments,
     std::string *gpuSource = nullptr, MetalLaunchOptions options = {});
+ShapedTensorF32Result
+runShapedTensorF32GPU(const std::string &expression,
+                      std::span<const ShapedTensorF32Argument> arguments,
+                      std::string *gpuSource = nullptr,
+                      MetalLaunchOptions options = {});
 bool gpuIsAvailable();
 std::string gpuName();
 

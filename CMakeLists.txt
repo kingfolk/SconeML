@@ -315,3 +315,28 @@ add_dependencies(f32_cpu_contracts LetAlgDialectIncGen)
 target_link_libraries(f32_cpu_contracts PRIVATE SconeMLTestSpec MLIR MLIRExecutionEngine)
 add_test(NAME f32_cpu_contracts COMMAND f32_cpu_contracts
   ${CMAKE_CURRENT_SOURCE_DIR}/test/f32_cpu/semantics.ml)
+
+function(add_f32_gpu_contract_target target runtime)
+  add_llvm_executable(${target}
+    test/runner/F32GPUContracts.cpp
+    src/tensor/GPURunner.cpp
+    src/tensor/TensorFrontend.cpp
+    src/tensor/MetalLaunch.cpp
+    src/dialect/LetAlgDialect.cpp
+    ${runtime})
+  target_compile_options(${target} PRIVATE -fexceptions)
+  add_dependencies(${target} LetAlgDialectIncGen)
+  target_link_libraries(${target} PRIVATE SconeMLTestSpec SconeMLTensorGPU SconeMLMetalExporter MLIR)
+endfunction()
+add_f32_gpu_contract_target(f32_gpu_contracts ${SCONEML_GPU_RUNTIME})
+if(APPLE)
+  target_link_libraries(f32_gpu_contracts PRIVATE "-framework Foundation" "-framework Metal")
+else()
+  target_compile_definitions(f32_gpu_contracts PRIVATE SCONEML_EXPECT_METAL_STUB)
+endif()
+add_f32_gpu_contract_target(f32_gpu_stub_contracts src/tensor/MetalRuntimeStub.cpp)
+target_compile_definitions(f32_gpu_stub_contracts PRIVATE SCONEML_EXPECT_METAL_STUB)
+add_test(NAME f32_gpu_contracts COMMAND f32_gpu_contracts
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/f32_gpu/semantics.ml)
+add_test(NAME f32_gpu_stub_contracts COMMAND f32_gpu_stub_contracts
+  ${CMAKE_CURRENT_SOURCE_DIR}/test/f32_gpu/semantics.ml)

@@ -34,9 +34,14 @@ MetalLaunch planMetalLaunch(
 
 // Owned shape-specialized counts exported from verified device IR. Each input
 // retains its own size; no MLIR/context references escape into the runtime.
+enum class MetalElementType { I32, F32 };
+enum class MetalFloatProfile { None, SignedFTZ };
 struct MetalKernelLayout {
   std::vector<std::size_t> inputElementCounts;
   std::size_t outputElementCount = 0;
+  MetalElementType elementType = MetalElementType::I32;
+  std::size_t elementByteSize = 4;
+  MetalFloatProfile floatProfile = MetalFloatProfile::None;
 };
 struct ShapedMetalLaunch {
   MetalLaunch output;
@@ -59,6 +64,33 @@ ShapedMetalLaunch validateShapedMetalInputs(
     const MetalKernelLayout &layout, std::span<const MetalInput> inputs,
     std::span<int32_t> output, std::size_t elementCount,
     MetalLaunchOptions options = {});
+
+// Explicit f32 boundary; byte sharing never reinterprets integer spans.
+using MetalF32Input = std::span<const float>;
+void runShapedMetalKernelF32(const std::string &source,
+                             const std::string &entrypoint,
+                             const MetalKernelLayout &layout,
+                             std::span<const MetalF32Input> inputs,
+                             std::span<float> output, std::size_t elementCount,
+                             MetalLaunchOptions options = {});
+ShapedMetalLaunch
+validateShapedMetalF32Inputs(const MetalKernelLayout &layout,
+                             std::span<const MetalF32Input> inputs,
+                             std::span<float> output, std::size_t elementCount,
+                             MetalLaunchOptions options = {});
+
+namespace detail {
+using MetalByteInput = std::span<const std::byte>;
+ShapedMetalLaunch validateShapedMetalBytes(
+    const MetalKernelLayout &layout, std::span<const MetalByteInput> inputs,
+    std::span<std::byte> output, std::size_t count, MetalLaunchOptions options);
+void runShapedMetalBytes(const std::string &source,
+                         const std::string &entrypoint,
+                         const MetalKernelLayout &layout,
+                         std::span<const MetalByteInput> inputs,
+                         std::span<std::byte> output, std::size_t count,
+                         MetalLaunchOptions options);
+} // namespace detail
 
 // Synchronous one-shot compilation and dispatch. Empty input is a no-op even
 // without a device. Only the first elementCount elements are read/written.
