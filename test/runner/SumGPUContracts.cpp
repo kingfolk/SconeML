@@ -17,7 +17,7 @@ template <typename F> void rejects(const char *message, F action) {
 } // namespace
 int main(int argc, char **argv) {
   try {
-    require(argc == 2, "sum fixture required");
+    require(argc == 3, "sum and composition fixtures required");
     auto test = readCase(argv[1], "rows");
     auto data = test.runs.front().arguments->front().values;
     auto original = data;
@@ -66,6 +66,12 @@ int main(int argc, char **argv) {
                 zero.shape == std::vector<int64_t>({2}) && dump.empty(),
             "empty GPU reduction identity");
 #ifdef SCONEML_EXPECT_METAL_STUB
+    auto composition = readCase(argv[2], "overlap-i32");
+    std::vector<ShapedTensorArgument> composedArgs;
+    for (const auto &a : *composition.runs.front().arguments)
+      composedArgs.push_back({a.name, a.values, *a.shape});
+    rejects("only available on macOS",
+            [&] { runSumI32GPU(composition.program, composedArgs); });
     rejects("only available on macOS",
             [&] { runSumI32GPU(test.program, args); });
 #else
@@ -82,6 +88,23 @@ int main(int argc, char **argv) {
       auto changed = runSumI32GPU(test.program, args, &changedDump);
       require(changed.values != result.values && dump == changedDump,
               "sum shader embedded values or result alias");
+      auto composition = readCase(argv[2], "overlap-i32");
+      auto shared = composition.runs.front().arguments->front().values;
+      const auto unchanged = shared;
+      std::array<ShapedTensorArgument, 2> overlap{
+          {{"a", shared, {2, 3}},
+           {"b", std::span<const int32_t>(shared).subspan(1, 3), {3}}}};
+      auto composed = runSumI32GPU(composition.program, overlap);
+      Number composedExpected;
+      for (const auto &a : composition.assertions.at("cpu"))
+        if (a.kind == "result")
+          composedExpected = parseNumber(a.value);
+      require(Number{true, composed.values} == composedExpected &&
+                  shared == unchanged,
+              "materialized map/sum overlapping inputs");
+      shared.clear();
+      require(Number{true, composed.values} == composedExpected,
+              "map/sum result lifetime");
       data.clear();
       require(Number{true, result.values} == expected,
               "GPU sum result lifetime");

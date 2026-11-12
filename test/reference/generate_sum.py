@@ -93,7 +93,7 @@ def invalid():
         ('keepdims','sum(a, keepdims=true)','keepdims is unsupported'),
         ('missing-operand','sum()','requires an operand'),
         ('not-sum','a','requires sum('),
-        ('unknown','sum(b)','currently requires one named input'),
+        ('unknown','sum(b)','unknown tensor expression variable'),
     ]:
         out+=f'''(* @case {name} *)
 (* @test
@@ -115,6 +115,48 @@ message: "{message}"
 
 '''
     return out
+
+def composed(name,expression,args,instructions,axis,f32,constants=None):
+    shape=M4['shape_of'](args)
+    mapped=[]
+    if f32:
+        shape,mapped=M4['evaluate'](args,instructions,constants or {},'r')
+    else:
+        for coord in product(*(range(n) for n in shape)):
+            env=dict(constants or {})
+            for key,dims,data in args:
+                offset=0
+                for extent,index in zip(dims,coord[-len(dims):]):offset=offset*extent+(0 if extent==1 else index)
+                env[key]=data[offset]&MASK
+            for dest,op,a,b in instructions:
+                env[dest]={'add':lambda:env[a]+env[b],'sub':lambda:env[a]-env[b],'mul':lambda:env[a]*env[b]}[op]()&MASK
+            mapped.append(env['r'])
+    out_shape,result=sums(shape,mapped,axis,f32)
+    dtype='f32' if f32 else 'i32'
+    text=f'(* @case {name} *)\n(* @test\nversion: 1\ninput: source\nruns:\n'
+    for run in ('cpu','metal'):
+        text+=f'  - name: {run}\n    pipeline: sum-{dtype}-{run}\n'
+        if f32:text+='    profile: f32-sum-tree256-ftz\n'
+        text+='    arguments:\n'
+        for key,dims,data in args:text+=f'      - name: {key}\n        dtype: {dtype}\n        shape: {dims}\n        values: {array(data,f32)}\n'
+    text+='*)\n'
+    for run in ('cpu','metal'):text+=f'(* @assert:{run}:result\n{array(result,f32)}\n*)\n(* @assert:{run}:shape\n{out_shape}\n*)\n'
+    text+='(* @assert:metal:compare\ncpu\n*)\n'
+    return text+'sum('+expression+(f', axis={axis}' if axis is not None else '')+')\n\n'
+
+def composition_cases():
+    text=''
+    for f32 in (False,True):
+        convert=(lambda vs:[M4['literal'](str(v)) for v in vs]) if f32 else (lambda vs:[v&MASK for v in vs])
+        dtype='f32' if f32 else 'i32'
+        args=[('a',[2,3],convert([1,2,3,4,5,6])),('b',[3],convert([10,20,30]))]
+        for axis in (None,0,1):text+=composed(f'sample-{dtype}-{axis}','a * b',args,[('r','mul','a','b')],axis,f32)
+        text+=composed(f'overlap-{dtype}','a * b',[args[0],('b',[3],convert([2,3,4]))],[('r','mul','a','b')],1,f32)
+        text+=composed(f'three-{dtype}','a * b + c',args+[('c',[2,1],convert([1,-1]))],[('p','mul','a','b'),('r','add','p','c')],1,f32)
+        text+=composed(f'empty-{dtype}','a * b',[('a',[2,0],[]),('b',[1],convert([1]))],[('r','mul','a','b')],1,f32)
+        text+=composed(f'zero-output-{dtype}','a * b',[('a',[0,3],[]),('b',[3],convert([1,2,3]))],[('r','mul','a','b')],1,f32)
+        text+=composed(f'unused-{dtype}','a + a',[('a',[3],convert([1,2,3])),('b',[2,1],convert([4,5]))],[('r','add','a','a')],0,f32)
+    return text
 
 def files():
     body=''.join(case(*d) for d in dataset())
@@ -160,7 +202,7 @@ CHECK: threadgroup_barrier(mem_flags::mem_threadgroup)
 CHECK: output[group] = scratch[0]
 *)'''+msl[end:]
     return {'sum_cpu/semantics.ml':body,'sum_cpu/invalid.ml':invalid(),'sum_cpu/structure.ml':structure,
-            'sum_gpu/semantics.ml':gpu,'sum_gpu/invalid.ml':gpu_invalid,'sum_gpu/structure.ml':msl}
+            'sum_gpu/semantics.ml':gpu,'sum_gpu/invalid.ml':gpu_invalid,'sum_gpu/structure.ml':msl,'map_sum/semantics.ml':composition_cases()}
 
 def anchors():
     require(tree([1,2,3],False)==6,'i32 tree anchor')

@@ -95,9 +95,6 @@ void validateSumPlan(const SumPlan &p) {
 SumPlan prepareSum(const std::string &source,
                    std::span<const ShapedTensorArgumentSpec> args, bool f32) {
   auto expression = parseSumExpression(source);
-  if (args.size() != 1 || expression.map != args.front().name)
-    throw std::invalid_argument("sum currently requires one named input; map "
-                                "composition follows in M5-C");
   mlir::MLIRContext context;
   context.getOrLoadDialect<mlir::arith::ArithDialect>();
   context.getOrLoadDialect<mlir::func::FuncDialect>();

@@ -12,6 +12,7 @@
 #include "mlir/IR/Verifier.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Target/LLVMIR/Dialect/All.h"
+#include "src/tensor/CPURunner.h"
 #include "src/tensor/F32Support.h"
 #include "src/tensor/Sum.h"
 #include "llvm/Support/TargetSelect.h"
@@ -202,6 +203,19 @@ SumResult<T> run(const std::string &source, std::span<const Arg> args,
   SumResult<T> result{std::vector<T>(plan.outputCount), plan.outputShape};
   if (!plan.outputCount || !plan.length)
     return result;
+  std::vector<T> mapped;
+  std::span<const T> values = args.front().values;
+  auto expression = parseSumExpression(source);
+  if (args.size() != 1 || expression.map != args.front().name) {
+    if constexpr (f32)
+      mapped = runShapedTensorF32CPU(expression.map, args).values;
+    else
+      mapped = runShapedTensorCPU(expression.map, args).values;
+    values = mapped;
+  }
+  if (values.size() != plan.inputCount)
+    throw std::runtime_error(
+        "materialized sum input does not match inferred shape");
   static bool initialized = [] {
     llvm::InitializeNativeTarget();
     llvm::InitializeNativeTargetAsmPrinter();
@@ -246,7 +260,7 @@ SumResult<T> run(const std::string &source, std::span<const Arg> args,
   auto function = (*engine)->lookup("_mlir_ciface_sum_tree");
   if (!function)
     throw std::runtime_error(llvm::toString(function.takeError()));
-  auto *data = const_cast<T *>(args.front().values.data());
+  auto *data = const_cast<T *>(values.data());
   StridedMemRefType<T, 1> in{
       data, data, 0, {static_cast<int64_t>(plan.inputCount)}, {1}},
       out{result.values.data(),

@@ -22,8 +22,9 @@ unsupported). Rank-1 axis=0 and global sums produce rank-0 output, represented
 by shape `{}` with exactly one owned value. Axis lists, negative axes, duplicate
 axes, other keywords, nested sums and trailing source are rejected.
 
-M5-A requires one named input as the operand. M5-C will add expressions with
-multiple inputs and broadcasting through the existing elementwise APIs.
+M5-C accepts one to three uniquely named inputs and the existing elementwise
+expression grammar with trailing-axis broadcasting. The map operand is
+validated and its shape inferred before sum-axis/empty/device handling.
 
 The identity is zero. `[2,0]` along axis=1 produces `[0,0]` with shape `[2]`;
 `[0,3]` along axis=1 produces no elements with shape `[0]`. Global empty sum is
@@ -113,3 +114,35 @@ Source/schema/axis/launch validation precedes device skips in the test adapter.
 The [Metal compute encoder model](https://developer.apple.com/library/archive/documentation/Miscellaneous/Conceptual/MetalProgrammingGuide/Compute-Ctx/Compute-Ctx.html)
 provides the serial encoding and threadgroup execution basis; ordinary tracked
 resources are used, not untracked heaps or concurrent encoders.
+
+
+## Materialized map-to-sum composition (M5-C)
+
+```cpp
+std::vector<int32_t> a{1,2,3,4,5,6}, b{10,20,30};
+std::array<sconeml::tensor::ShapedTensorArgument,2> args{{
+    {"a",a,{2,3}}, {"b",b,{3}}}};
+auto result=sconeml::tensor::runSumI32CPU("sum(a * b, axis=1)",args);
+// map [10,40,90,40,100,180], then result [140,320], shape [2].
+```
+
+The GPU API accepts the same arguments/source. The existing M4 frontend checks
+all argument names, storage and broadcast shapes, including unused inputs;
+axis validation uses the complete inferred map shape. Nontrivial maps are
+materialized through the matching production shaped CPU or GPU API, and an
+owned vector remains alive until sum finishes. A single direct named-input sum
+avoids an unnecessary map invocation. Empty maps still validate syntax/literals
+and every declared argument before returning identities without target work.
+
+This is synchronous materialization, not kernel fusion. On Metal, the M4 map
+completes and returns owned host values before the sum uploads/executes its
+partial-reduction dispatches. There is no hidden CPU evaluation/reduction in an
+explicit GPU request; a missing device fails nonempty map/sum execution. No
+performance or persistent-buffer claim is made. The optional LLVM/MSL dump and
+sum IR adapters describe the sum stage; inspect the operand separately with
+M4's shaped frontend/IR adapters to examine map lowering.
+
+The float map preserves the M4 signed-FTZ scalar contract. Its results then enter
+the explicitly distinct fixed-tree sum profile, including positive-zero identity.
+The reduction error bound applies to those mapped/normalized input values;
+map rounding is accounted for by its own per-operation contract/oracle.

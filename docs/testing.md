@@ -519,3 +519,8 @@ See [sum usage](sum-execution.md) and [M5-A evidence](m5-a-acceptance.md).
 barrier/indexing checks. `sum_gpu_contracts` / `sum_gpu_stub_contracts` verify
 metadata/source/dispatch corruption, byte limits and direct ownership.
 See [M5-B evidence](m5-b-acceptance.md).
+
+`test/map_sum/semantics.ml` adds 16 cases / 32 CPU/Metal runs for materialized
+broadcast-expression reductions, including the `[140,320]` row-sum example.
+The existing direct sum executables also consume this file to test actual
+borrowed-span overlap and output lifetime. See [M5-C evidence](m5-c-acceptance.md).
