@@ -524,3 +524,14 @@ See [M5-B evidence](m5-b-acceptance.md).
 broadcast-expression reductions, including the `[140,320]` row-sum example.
 The existing direct sum executables also consume this file to test actual
 borrowed-span overlap and output lifetime. See [M5-C evidence](m5-c-acceptance.md).
+
+## Full M5 acceptance and walkthrough
+
+`test/acceptance_m5/` adds 47 cases / 92 runs covering actual three-dispatch
+65,537-item execution, strided axes, numerical bounds, exceptional cross-group
+arithmetic, composed broadcasts, invalid source and complete hand-authored i32/f32
+MSL. The sum generator now checks 10 files, retaining all A/B/C fixtures.
+Runner contracts prove wrong sum bits/shapes/profile/zero/goldens fail, invalid
+launches precede skips, and empty reductions succeed in strict no-device mode.
+`sum_walkthrough` is a CPU CTest and can be run manually with `--metal`, `--ir`,
+`--msl`; see [full evidence](m5-acceptance.md).

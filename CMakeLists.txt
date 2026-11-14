@@ -394,3 +394,10 @@ add_sum_gpu_contract(sum_gpu_stub_contracts src/tensor/SumMetalStub.cpp)
 target_compile_definitions(sum_gpu_stub_contracts PRIVATE SCONEML_EXPECT_METAL_STUB)
 add_test(NAME sum_gpu_contracts COMMAND sum_gpu_contracts ${CMAKE_CURRENT_SOURCE_DIR}/test/sum_gpu/semantics.ml ${CMAKE_CURRENT_SOURCE_DIR}/test/map_sum/semantics.ml)
 add_test(NAME sum_gpu_stub_contracts COMMAND sum_gpu_stub_contracts ${CMAKE_CURRENT_SOURCE_DIR}/test/sum_gpu/semantics.ml ${CMAKE_CURRENT_SOURCE_DIR}/test/map_sum/semantics.ml)
+
+add_llvm_executable(sum_walkthrough examples/sum_walkthrough.cpp
+  src/tensor/TensorFrontend.cpp src/dialect/LetAlgDialect.cpp)
+add_dependencies(sum_walkthrough LetAlgDialectIncGen)
+target_compile_options(sum_walkthrough PRIVATE -fexceptions)
+target_link_libraries(sum_walkthrough PRIVATE SconeMLSumGPU SconeMLSumCPU MLIR)
+add_test(NAME sum_walkthrough COMMAND sum_walkthrough)

@@ -15,3 +15,8 @@ The read-only fixture check never writes a golden or runs the compiler.
 all float/integer bindings, SSA numbering, input/output signed-FTZ sequences,
 constant bits and the bounds guard. `generate_m4.py` embeds it in a standalone
 source fixture; it must never be refreshed from actual compiler output.
+
+`sum-i32.msl` and `sum-f32.msl` are complete hand-authored M5 reduction shaders,
+including every binding, guard, scratch access, adjacent-pair step and uniform
+barrier. They are embedded in self-contained source fixtures by `generate_sum.py`
+and must not be refreshed from backend output.

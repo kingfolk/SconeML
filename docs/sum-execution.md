@@ -146,3 +146,11 @@ The float map preserves the M4 signed-FTZ scalar contract. Its results then ente
 the explicitly distinct fixed-tree sum profile, including positive-zero identity.
 The reduction error bound applies to those mapped/normalized input values;
 map rounding is accounted for by its own per-operation contract/oracle.
+
+## Complete evidence and runnable learning example
+
+[M5 acceptance](m5-acceptance.md) records the independent tree/reference model,
+size/magnitude bounds, real three-dispatch execution, full shader expectations,
+negative cases and final environment/results. Build/run `sum_walkthrough` for
+the requested `sum(a * b, axis=1)` example; use `--metal`, `--ir`, `--msl` to
+inspect the actual backend, map/reduction IR and sum shader.

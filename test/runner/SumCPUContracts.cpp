@@ -74,6 +74,24 @@ int main(int argc, char **argv) {
     rejects("u32",
             [&] { makeSumPlan(std::array<int64_t, 2>{65536, 65536}, {}); });
     rejects("outside", [&] { makeSumPlan(std::array<int64_t, 2>{2, 3}, -1); });
+    rejects("u32", [&] {
+      makeSumPlan(
+          std::array<int64_t, 2>{
+              0,
+              static_cast<int64_t>(std::numeric_limits<uint32_t>::max()) + 1},
+          {});
+    });
+    rejects("scratch", [&] {
+      makeSumPlan(std::array<int64_t, 1>{std::numeric_limits<uint32_t>::max()},
+                  {});
+    });
+    mlir::MLIRContext context;
+    auto module = mlir::OwningOpRef<mlir::ModuleOp>(
+        mlir::ModuleOp::create(mlir::UnknownLoc::get(&context)));
+    auto nested = mlir::ModuleOp::create(mlir::UnknownLoc::get(&context));
+    module->getBody()->push_back(nested);
+    rejects("raw IR is unsupported",
+            [&] { buildSumCPU(*module, plan, false); });
     require(parseShape("[]", true).empty(), "sum scalar shape parser");
     rejects("shape assertion", [&] { parseShape("[]"); });
     std::cout

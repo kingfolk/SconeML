@@ -158,6 +158,90 @@ def composition_cases():
         text+=composed(f'unused-{dtype}','a + a',[('a',[3],convert([1,2,3])),('b',[2,1],convert([4,5]))],[('r','add','a','a')],0,f32)
     return text
 
+def finite_bound(values):
+    from fractions import Fraction
+    normalized=[canonical(v) for v in values]
+    require(all((v&0x7fffffff)<0x7f800000 for v in normalized),'bound requires finite inputs')
+    exact=sum((M4['rational'](v) for v in normalized),Fraction())
+    magnitude=sum((abs(M4['rational'](v)) for v in normalized),Fraction())
+    result=tree(normalized,True)
+    require((result&0x7fffffff)<0x7f800000,'bound case unexpectedly overflowed')
+    n=len(normalized);q=0;depth=0
+    while n:
+        chunks=(n+255)//256;q+=255*chunks;depth+=8
+        if chunks==1:break
+        n=chunks
+    u=Fraction(1,1<<24);eta=Fraction(1,1<<126)
+    bound=depth*u/(1-depth*u)*magnitude+q*eta*(1+u)**depth
+    require(abs(M4['rational'](result)-exact)<=bound,'size/magnitude/FTZ bound violated')
+
+def acceptance():
+    text=''
+    for n in (2,3,255,256,257,511,512,513,1025,65537):
+        values=[(i*2654435761)&MASK for i in range(n)]
+        text+=case(f'global-i32-{n}',[n],values,None,False,[('cpu','sum-i32-cpu'),('metal','sum-i32-metal')])
+    for axis,shape in ((0,[257,3]),(1,[3,257])):
+        values=[(i*1103515245+12345)&MASK for i in range(prod(shape))]
+        text+=case(f'strided-i32-axis{axis}',shape,values,axis,False,[('cpu','sum-i32-cpu'),('metal','sum-i32-metal')])
+    for n in (1,2,3,255,256,257,513,1025,4097):
+        state=0x5c0e0005;values=[]
+        for i in range(n):
+            state=(1664525*state+1013904223)&MASK
+            values.append((state&0x807fffff)|((100+(state>>24)%41)<<23))
+        finite_bound(values)
+        text+=case(f'finite-f32-{n}',[n],values,None,True,[('cpu','sum-f32-cpu'),('metal','sum-f32-metal')])
+    for name,values in [
+        ('cancel-cross-group',[0x4b800000,0x3f800000,0x3f800000,0xcb800000]+[0]*252+[0x3f800000]),
+        ('nan-cross-group',[0x7f800000]+[0]*255+[0xff800000]),
+        ('overflow-tree',[0x7f7fffff,0x7f7fffff,0xff7fffff,0xff7fffff]),
+        ('negative-zero-full-group',[0x80000000]*256),
+        ('tiny-inputs',[0x007fffff,0x807fffff]*257),
+        ('signaling-nan-tail',[0]*512+[0x7f800001]),
+    ]:
+        text+=case(name,[len(values)],values,None,True,[('cpu','sum-f32-cpu'),('metal','sum-f32-metal')])
+    for f32 in (False,True):
+        dtype='f32' if f32 else 'i32';convert=(lambda x:M4['literal'](str(x))) if f32 else (lambda x:x&MASK)
+        args=[('a',[257,3],[convert(i%13-6) for i in range(771)]),('b',[3],[convert(1),convert(2),convert(3)]),('c',[257,1],[convert(i%5) for i in range(257)])]
+        for axis in (0,1,None):text+=composed(f'composed-{dtype}-{axis}','a * b + c',args,[('p','mul','a','b'),('r','add','p','c')],axis,f32)
+        text+=composed(f'empty-unused-{dtype}','a + a',[('a',[1,3],[convert(1)]*3),('b',[0,3],[])],[('r','add','a','a')],0,f32)
+    return text
+
+def sum_goldens():
+    text=''
+    for dtype in ('i32','f32'):
+        expected=(Path(__file__).parent/'msl'/f'sum-{dtype}.msl').read_text()
+        profile='    profile: f32-sum-tree256-ftz\n' if dtype=='f32' else ''
+        text+=f'(* @case full-{dtype}-shader *)\n(* @test\nversion: 1\ninput: source\nruns:\n  - name: shader\n    pipeline: sum-{dtype}-msl\n'+profile+f'    arguments:\n      - name: a\n        dtype: {dtype}\n        values: [1,2,3,4,5,6]\n        shape: [2,3]\n*)\n'
+        text+='(* @assert:shader:text-equal\n'+expected+'*)\n(* @assert:shader:entrypoint\nsum_tree\n*)\nsum(a, axis=1)\n\n'
+    return text
+
+def acceptance_errors():
+    text=''
+    empty=[('a',[0,3],[])]
+    for name,source,args,message,f32 in [
+        ('bad-storage','sum(a, axis=1)',[('a',[0,3],[1])],'storage count does not match shape product',False),
+        ('bad-rank','sum(a)',[('a',[0,1,1],[])],'rank must be 1 or 2',False),
+        ('duplicate-name','sum(a)',empty+empty,'duplicate tensor argument name',False),
+        ('no-inputs','sum(1)',[],'between one and three',False),
+        ('bad-broadcast','sum(a + b, axis=1)',empty+[('b',[2],[1,2])],'incompatible shaped tensor broadcast',False),
+        ('reserved-name','sum(let)',[('let',[0],[])],'invalid tensor argument name',False),
+        ('missing-map-operand','sum(a +, axis=1)',empty,'missing an operand',False),
+        ('fractional-axis','sum(a, axis=1.0)',empty,'nonnegative integer',False),
+        ('literal-overflow-empty','sum(a * 1e100, axis=1)',empty,'outside finite binary32 range',True),
+        ('nested-reduction','sum(sum(a))',empty,'expected +, - or *',False),
+    ]:
+        dtype='f32' if f32 else 'i32'
+        text+=f'(* @case {name} *)\n(* @test\nversion: 1\ninput: source\nruns:\n'
+        for run in ('cpu','metal'):
+            text+=f'  - name: {run}\n    pipeline: sum-{dtype}-{run}\n'
+            if f32:text+='    profile: f32-sum-tree256-ftz\n'
+            text+='    arguments:'+(' []\n' if not args else '\n')
+            for key,shape,data in args:text+=f'      - name: {key}\n        dtype: {dtype}\n        shape: {shape}\n        values: {array(data,f32)}\n'
+        text+='*)\n'
+        for run in ('cpu','metal'):text+=f'(* @assert:{run}:error\nstage: frontend\nmessage: "{message}"\n*)\n'
+        text+=source+'\n\n'
+    return text
+
 def files():
     body=''.join(case(*d) for d in dataset())
     # Structural iterator and identity checks are device-independent.
@@ -202,7 +286,7 @@ CHECK: threadgroup_barrier(mem_flags::mem_threadgroup)
 CHECK: output[group] = scratch[0]
 *)'''+msl[end:]
     return {'sum_cpu/semantics.ml':body,'sum_cpu/invalid.ml':invalid(),'sum_cpu/structure.ml':structure,
-            'sum_gpu/semantics.ml':gpu,'sum_gpu/invalid.ml':gpu_invalid,'sum_gpu/structure.ml':msl,'map_sum/semantics.ml':composition_cases()}
+            'sum_gpu/semantics.ml':gpu,'sum_gpu/invalid.ml':gpu_invalid,'sum_gpu/structure.ml':msl,'map_sum/semantics.ml':composition_cases(),'acceptance_m5/numerics.ml':acceptance(),'acceptance_m5/shaders.ml':sum_goldens(),'acceptance_m5/invalid.ml':acceptance_errors()}
 
 def anchors():
     require(tree([1,2,3],False)==6,'i32 tree anchor')
@@ -211,6 +295,7 @@ def anchors():
     require(tree([1,0x80000001],True)==0,'sum input FTZ anchor')
     require(sums([2,0],[],1,False)==([2],[0,0]),'empty reduction identity')
     require(sums([0,3],[],1,False)==([0],[]),'zero output count')
+    finite_bound([0x4b800000,0x3f800000,0x3f800000,0xcb800000])
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--check',action='store_true');args=parser.parse_args()

@@ -522,3 +522,42 @@ file(WRITE "${SCRATCH}/wrong-f32-golden.ml" "${changed}")
 expect_failure(wrong-f32-golden "actual:" --no-metal
   --file "${SCRATCH}/wrong-f32-golden.ml" --run device)
 message(STATUS "f32 exact/zero-sign/profile/dtype/completeness/golden/device contracts passed")
+
+# M5 source completeness and strict device policy also apply to reductions.
+read_source_case("${DATA_ROOT}/sum_cpu/semantics.ml" "rows" sum_rows)
+string(REPLACE "(* @assert:cpu:result\n[6, 15]" "(* @assert:cpu:result\n[7, 15]" changed "${sum_rows}")
+file(WRITE "${SCRATCH}/wrong-sum-result.ml" "${changed}")
+expect_failure(wrong-sum-result "first differing element [0]" --file "${SCRATCH}/wrong-sum-result.ml")
+string(REPLACE "(* @assert:cpu:shape\n[2]\n*)\n" "" changed "${sum_rows}")
+file(WRITE "${SCRATCH}/missing-sum-shape.ml" "${changed}")
+expect_config_failure(missing-sum-shape "shaped execution requires shape" --file "${SCRATCH}/missing-sum-shape.ml")
+read_source_case("${DATA_ROOT}/sum_cpu/semantics.ml" "global" sum_global)
+string(REPLACE "(* @assert:cpu:shape\n[]\n*)\n" "" changed "${sum_global}")
+file(WRITE "${SCRATCH}/missing-sum-scalar-shape.ml" "${changed}")
+expect_config_failure(missing-sum-scalar-shape "shaped execution requires shape" --file "${SCRATCH}/missing-sum-scalar-shape.ml")
+read_source_case("${DATA_ROOT}/acceptance_m5/numerics.ml" "negative-zero-full-group" sum_zero)
+string(REPLACE "(* @assert:cpu:result\n[0x00000000]" "(* @assert:cpu:result\n[0x80000000]" changed "${sum_zero}")
+file(WRITE "${SCRATCH}/wrong-sum-zero.ml" "${changed}")
+expect_failure(wrong-sum-zero "first differing f32 element [0]" --file "${SCRATCH}/wrong-sum-zero.ml" --run cpu)
+string(REPLACE "profile: f32-sum-tree256-ftz" "profile: f32-ftz" changed "${sum_zero}")
+file(WRITE "${SCRATCH}/wrong-sum-profile.ml" "${changed}")
+expect_config_failure(wrong-sum-profile "explicit f32-sum-tree256-ftz profile" --file "${SCRATCH}/wrong-sum-profile.ml" --run cpu)
+expect_failure(sum-strict-device "required device unavailable" --no-metal --require-metal
+  --file "${DATA_ROOT}/sum_gpu/semantics.ml" --case global --run metal)
+expect_success(sum-empty-dimension "1 passed, 0 skipped, 0 failed" --no-metal --require-metal
+  --file "${DATA_ROOT}/sum_gpu/semantics.ml" --case empty-1 --run metal)
+expect_success(sum-zero-output "1 passed, 0 skipped, 0 failed" --no-metal --require-metal
+  --file "${DATA_ROOT}/sum_gpu/semantics.ml" --case empty-3 --run metal)
+expect_success(sum-negative-before-device "20 passed, 0 skipped, 0 failed" --no-metal --require-metal
+  --file "${DATA_ROOT}/acceptance_m5/invalid.ml")
+read_source_case("${DATA_ROOT}/sum_cpu/semantics.ml" "empty-0" empty_sum)
+string(REPLACE "pipeline: sum-i32-cpu" "pipeline: sum-i32-metal\n    threads-per-group: 128" changed "${empty_sum}")
+string(REPLACE "(* @assert:cpu:result\n[0]\n*)\n(* @assert:cpu:shape\n[]\n*)"
+  "(* @assert:cpu:error\nstage: gpu-lowering\nmessage: width 256\n*)" changed "${changed}")
+file(WRITE "${SCRATCH}/sum-width-before-device.ml" "${changed}")
+expect_success(sum-width-before-device "1 passed, 0 skipped, 0 failed" --no-metal --require-metal --file "${SCRATCH}/sum-width-before-device.ml")
+read_source_case("${DATA_ROOT}/acceptance_m5/shaders.ml" "full-i32-shader" sum_shader)
+string(REPLACE "stride *= 2u" "stride += 2u" changed "${sum_shader}")
+file(WRITE "${SCRATCH}/wrong-sum-shader.ml" "${changed}")
+expect_failure(wrong-sum-shader "actual:" --no-metal --file "${SCRATCH}/wrong-sum-shader.ml")
+message(STATUS "Sum value/shape/profile/zero/golden/empty/launch/device-policy contracts passed")

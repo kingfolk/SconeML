@@ -59,6 +59,18 @@ int main(int argc, char **argv) {
                 large.dispatches[1].parts == 2 &&
                 large.dispatches[2].parts == 1,
             "multi-dispatch dependency plan");
+    auto broken = large;
+    broken.dispatches.pop_back();
+    rejects("canonical",
+            [&] { validateSumMetal(broken, MetalElementType::I32, 65537, 1); });
+    broken = large;
+    std::swap(broken.dispatches[0], broken.dispatches[1]);
+    rejects("canonical",
+            [&] { validateSumMetal(broken, MetalElementType::I32, 65537, 1); });
+    broken = large;
+    broken.dispatches[0].groupCount += 1;
+    rejects("canonical",
+            [&] { validateSumMetal(broken, MetalElementType::I32, 65537, 1); });
     std::array<ShapedTensorArgument, 1> empty{{{"a", {}, {2, 0}}}};
     std::string dump = "stale";
     auto zero = runSumI32GPU("sum(a, axis=1)", empty, &dump);
