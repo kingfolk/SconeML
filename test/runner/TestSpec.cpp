@@ -120,11 +120,17 @@ bool knownPipeline(const std::string &name) {
                                            "shaped-f32-ir",
                                            "shaped-f32-metal",
                                            "shaped-f32-gpu-ir",
-                                           "shaped-f32-msl"};
+                                           "shaped-f32-msl",
+                                           "sum-i32-cpu",
+                                           "sum-f32-cpu",
+                                           "sum-i32-ir",
+                                           "sum-f32-ir"};
   return names.contains(name);
 }
 
 static bool numericPipeline(const std::string &pipeline) {
+  if (pipeline.starts_with("sum-"))
+    return pipeline.ends_with("-cpu") || pipeline.ends_with("-metal");
   return pipeline == "tensor-cpu" || pipeline == "scalar-cpu" ||
          pipeline == "legacy-cpu" || pipeline == "tensor-metal" ||
          pipeline == "tensor-cpu-ir" || pipeline == "tensor-metal-ir" ||
@@ -134,6 +140,15 @@ static bool numericPipeline(const std::string &pipeline) {
 }
 
 static bool supports(const std::string &pipeline, const std::string &kind) {
+  if (pipeline.starts_with("sum-")) {
+    if (kind == "success" || kind == "error")
+      return true;
+    if (kind == "result" || kind == "shape" || kind == "compare")
+      return numericPipeline(pipeline);
+    if (kind == "ir-check" || kind == "ir-equal")
+      return pipeline.ends_with("-ir") || pipeline.ends_with("-cpu");
+    return false;
+  }
   if (pipeline.starts_with("shaped-f32-")) {
     if (kind == "success" || kind == "error")
       return true;
@@ -186,10 +201,11 @@ static bool supports(const std::string &pipeline, const std::string &kind) {
          pipeline == "tensor-input-metal";
 }
 
-std::vector<int64_t> parseShape(const std::string &text) {
+std::vector<int64_t> parseShape(const std::string &text, bool scalar) {
   auto shape = yaml<std::vector<int64_t>>(text);
-  require(!shape.empty() && shape.size() <= 2 &&
-              std::all_of(shape.begin(), shape.end(), [](int64_t n) { return n >= 0; }),
+  require((scalar || !shape.empty()) && shape.size() <= 2 &&
+              std::all_of(shape.begin(), shape.end(),
+                          [](int64_t n) { return n >= 0; }),
           "shape assertion requires rank 1 or 2 nonnegative extents");
   return shape;
 }
@@ -463,10 +479,15 @@ static TestCase parseSingleCase(const std::string &path,
     require(!run.name.empty() && names.insert(run.name).second,
             "empty or duplicate run name: " + run.name);
     require(knownPipeline(run.pipeline), "unknown pipeline: " + run.pipeline);
-    const bool floatRun = run.pipeline.starts_with("shaped-f32-");
-    const bool shaped = run.pipeline.starts_with("shaped-input-") || floatRun;
-    require(floatRun ? (run.profile && *run.profile == "f32-ftz")
-                     : !run.profile,
+    const bool floatRun = run.pipeline.starts_with("shaped-f32-") ||
+                          run.pipeline.starts_with("sum-f32-");
+    const bool sumRun = run.pipeline.starts_with("sum-");
+    const bool shaped =
+        run.pipeline.starts_with("shaped-input-") || floatRun || sumRun;
+    require(floatRun
+                ? (run.profile &&
+                   *run.profile == (sumRun ? "f32-sum-tree256-ftz" : "f32-ftz"))
+                : !run.profile,
             "f32 runs require explicit f32-ftz profile; profile forbidden on "
             "i32 runs");
     const bool sourceInputs = shaped || run.pipeline == "tensor-input-cpu" ||
@@ -528,7 +549,7 @@ static TestCase parseSingleCase(const std::string &path,
         error = true;
       }
       if (assertion.kind == "shape") {
-        parseShape(assertion.value);
+        parseShape(assertion.value, sumRun);
         hasShape = true;
       }
       hasValues |= assertion.kind == "result" || assertion.kind == "compare";
@@ -539,14 +560,16 @@ static TestCase parseSingleCase(const std::string &path,
             preceding.contains(assertion.value) &&
                 numericPipeline(preceding.at(assertion.value)) &&
                 floatRun ==
-                    preceding.at(assertion.value).starts_with("shaped-f32-"),
+                    (preceding.at(assertion.value).starts_with("shaped-f32-") ||
+                     preceding.at(assertion.value).starts_with("sum-f32-")),
             "compare must reference an earlier run: " + assertion.value);
       if (assertion.kind == "success" || assertion.kind == "source-unchanged")
         require(assertion.value == "true", assertion.kind + " must be true");
     }
     require(!error || found->second.size() == 1,
             "error cannot be combined with success assertions");
-    const bool shapedExecution = run.pipeline == "shaped-input-cpu" ||
+    const bool shapedExecution = (sumRun && numericPipeline(run.pipeline)) ||
+                                 run.pipeline == "shaped-input-cpu" ||
                                  run.pipeline == "shaped-input-metal" ||
                                  (run.pipeline == "shaped-f32-cpu" ||
                                   run.pipeline == "shaped-f32-metal");

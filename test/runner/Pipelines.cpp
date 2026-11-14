@@ -10,6 +10,7 @@
 #include "src/tensor/CPURunner.h"
 #include "src/tensor/GPURunner.h"
 #include "src/tensor/TensorFrontend.h"
+#include "test/runner/SumExecution.h"
 #include <bit>
 #include <cstring>
 
@@ -86,6 +87,8 @@ Output execute(const TestCase &test, const Run &run, bool disableMetal) {
         return mlir::success();
       });
   try {
+    if (run.pipeline.starts_with("sum-"))
+      return executeSum(test, run, output, disableMetal);
     if (run.pipeline.starts_with("shaped-f32-")) {
       output.stage = "frontend";
       std::vector<std::vector<float>> storage;

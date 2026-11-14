@@ -502,3 +502,13 @@ Runner contracts mutate exact results, zero signs, profile/dtype, missing
 shape/values, comparisons and the shader golden, and verify strict/empty/error
 device policy. See [M4 acceptance](m4-acceptance.md) for the oracle design,
 coverage/evidence map, numerical contract and final results.
+
+## Sum CPU execution
+
+`sum-i32-cpu` / `sum-f32-cpu` execute the production fixed-tree sum APIs;
+`sum-i32-ir` / `sum-f32-ir` expose explicit Linalg identities/reduction iterators.
+Sum execution requires both values and shape assertions, and uniquely accepts
+rank-0 shape `[]`. F32 runs require `profile: f32-sum-tree256-ftz`.
+`sum_cpu_contracts` verifies ABI/ownership/plan contracts; `sum_reference_fixtures`
+checks the independent wrapping/rational tree oracle without writing files.
+See [sum usage](sum-execution.md) and [M5-A evidence](m5-a-acceptance.md).
