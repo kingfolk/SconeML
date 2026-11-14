@@ -138,7 +138,29 @@ CHECK: arith.addi
 *)
 sum(a, axis=1)
 '''
-    return {'sum_cpu/semantics.ml':body,'sum_cpu/invalid.ml':invalid(),'sum_cpu/structure.ml':structure}
+    gpu=''
+    extra=list(dataset())
+    for f32 in (False,True):
+        for n in (1,255,256,257,513):
+            values=[0x3f800000]*n if f32 else [(i*65537)&MASK for i in range(n)]
+            extra.append((f'grid-{n}-'+('f32' if f32 else 'i32'),[n],values,None,f32))
+    for name,shape,data,axis,f32 in extra:
+        dtype='f32' if f32 else 'i32'
+        gpu+=case(name,shape,data,axis,f32,[('cpu',f'sum-{dtype}-cpu'),('metal',f'sum-{dtype}-metal')])
+    gpu_invalid=invalid().replace('sum-i32-cpu','sum-i32-metal')
+    msl=structure.replace('sum-i32-ir','sum-i32-msl')
+    start=msl.index('(* @assert:ir:ir-check');end=msl.index('*)',start)+2
+    msl=msl[:start]+'''(* @assert:ir:text-check
+CHECK: threadgroup Element scratch[256]
+CHECK: k < length ?
+CHECK: threadgroup_barrier(mem_flags::mem_threadgroup)
+CHECK: stride *= 2u
+CHECK: scratch[lane] = sum_add(scratch[lane], scratch[lane + stride])
+CHECK: threadgroup_barrier(mem_flags::mem_threadgroup)
+CHECK: output[group] = scratch[0]
+*)'''+msl[end:]
+    return {'sum_cpu/semantics.ml':body,'sum_cpu/invalid.ml':invalid(),'sum_cpu/structure.ml':structure,
+            'sum_gpu/semantics.ml':gpu,'sum_gpu/invalid.ml':gpu_invalid,'sum_gpu/structure.ml':msl}
 
 def anchors():
     require(tree([1,2,3],False)==6,'i32 tree anchor')

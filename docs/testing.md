@@ -512,3 +512,10 @@ rank-0 shape `[]`. F32 runs require `profile: f32-sum-tree256-ftz`.
 `sum_cpu_contracts` verifies ABI/ownership/plan contracts; `sum_reference_fixtures`
 checks the independent wrapping/rational tree oracle without writing files.
 See [sum usage](sum-execution.md) and [M5-A evidence](m5-a-acceptance.md).
+
+`sum-i32-metal` / `sum-f32-metal` execute the real/stub fixed-tree runtime;
+`sum-i32-msl` / `sum-f32-msl` expose its canonical shader. The 61 runs in
+`test/sum_gpu/` cover actual arithmetic, empty/device policy and structural
+barrier/indexing checks. `sum_gpu_contracts` / `sum_gpu_stub_contracts` verify
+metadata/source/dispatch corruption, byte limits and direct ownership.
+See [M5-B evidence](m5-b-acceptance.md).
