@@ -252,10 +252,11 @@ and [CPU validation evidence](docs/m4-a-acceptance.md) /
 binary32 oracle and real-device results: CTest 22/22 and strict Metal 1040/1040,
 with zero skips.
 
-### Sum reductions (M5-A)
+### Sum reductions (M5-A/B/C)
 
-`runSumI32CPU` / `runSumF32CPU` execute global or single-axis sums with owned
+`runSumI32CPU` / `runSumF32CPU` and their GPU counterparts execute global or single-axis sums with owned
 rank-0/rank-1 results, defined empty identities and fixed-tree numerical order.
 See [sum usage and numerical policy](docs/sum-execution.md) and
-[CPU evidence](docs/m5-a-acceptance.md). Metal execution and map composition
-follow in the dependent M5 stack layers.
+[CPU evidence](docs/m5-a-acceptance.md), [Metal evidence](docs/m5-b-acceptance.md)
+and [map composition evidence](docs/m5-c-acceptance.md).
+`sum(a * b, axis=1)` supports trailing-axis broadcasting and materialized execution.

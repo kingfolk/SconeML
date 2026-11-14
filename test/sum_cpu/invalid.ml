@@ -138,7 +138,7 @@ runs:
 *)
 (* @assert:cpu:error
 stage: frontend
-message: "currently requires one named input"
+message: "unknown tensor expression variable"
 *)
 sum(b)
 

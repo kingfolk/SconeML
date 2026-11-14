@@ -18,7 +18,7 @@ template <typename F> void rejects(const char *message, F action) {
 } // namespace
 int main(int argc, char **argv) {
   try {
-    require(argc == 2, "sum fixture required");
+    require(argc == 3, "sum and composition fixtures required");
     auto test = readCase(argv[1], "rows");
     auto data = test.runs[0].arguments->at(0).values;
     auto original = data;
@@ -47,6 +47,23 @@ int main(int argc, char **argv) {
     require(zero.shape.empty() && zero.values == std::vector<int32_t>{0} &&
                 ir.empty(),
             "rank-0 empty identity");
+    auto composition = readCase(argv[2], "overlap-i32");
+    auto shared = composition.runs.front().arguments->front().values;
+    const auto unchanged = shared;
+    std::array<ShapedTensorArgument, 2> overlap{
+        {{"a", shared, {2, 3}},
+         {"b", std::span<const int32_t>(shared).subspan(1, 3), {3}}}};
+    auto composed = runSumI32CPU(composition.program, overlap);
+    Number composedExpected;
+    for (const auto &a : composition.assertions.at("cpu"))
+      if (a.kind == "result")
+        composedExpected = parseNumber(a.value);
+    require(Number{true, composed.values} == composedExpected &&
+                shared == unchanged,
+            "materialized map/sum overlapping inputs");
+    shared.clear();
+    require(Number{true, composed.values} == composedExpected,
+            "map/sum result lifetime");
     auto plan = makeSumPlan(std::array<int64_t, 2>{2, 3}, 1);
     auto bad = plan;
     bad.inputStride = 3;

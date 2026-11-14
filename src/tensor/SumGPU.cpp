@@ -1,4 +1,5 @@
 #include "src/tensor/SumGPU.h"
+#include "src/tensor/GPURunner.h"
 #include <stdexcept>
 namespace sconeml::tensor {
 SumMetalProgram exportSumMetal(const SumPlan &plan, bool f32,
@@ -103,11 +104,26 @@ SumResult<T> run(const std::string &source, std::span<const A> args,
   auto plan = prepareSum(source, specs, f32);
   auto program = exportSumMetal(plan, f32, options);
   auto type = f32 ? MetalElementType::F32 : MetalElementType::I32;
-  validateSumMetal(program, type, args.front().values.size(), plan.outputCount);
+  validateSumMetal(program, type, plan.inputCount, plan.outputCount);
   SumResult<T> result{std::vector<T>(plan.outputCount), plan.outputShape};
   if (dump)
     *dump = program.source;
-  detail::runSumMetalBytes(program, type, std::as_bytes(args.front().values),
+  std::vector<T> mapped;
+  std::span<const T> values;
+  if (plan.inputCount) {
+    auto expression = parseSumExpression(source);
+    if (args.size() == 1 && expression.map == args.front().name)
+      values = args.front().values;
+    else {
+      if constexpr (f32)
+        mapped = runShapedTensorF32GPU(expression.map, args).values;
+      else
+        mapped = runShapedTensorGPU(expression.map, args).values;
+      values = mapped;
+    }
+  }
+  validateSumMetal(program, type, values.size(), result.values.size());
+  detail::runSumMetalBytes(program, type, std::as_bytes(values),
                            std::as_writable_bytes(std::span<T>(result.values)));
   return result;
 }
